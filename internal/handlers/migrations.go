@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"datacluster/internal/migration"
+	"datacluster/internal/pg"
 )
 
 func (h *Handlers) ListMigrations(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +48,7 @@ func (h *Handlers) CreateMigration(w http.ResponseWriter, r *http.Request) {
 		TargetServerID int    `json:"target_server_id"`
 		TargetDatabase string `json:"target_database"`
 		MigrateUsers   bool   `json:"migrate_users"`
+		CleanupSource  bool   `json:"cleanup_source"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
@@ -58,20 +60,20 @@ func (h *Handlers) CreateMigration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, err := h.db.CreateMigration(body.Name, body.SourceServerID, body.TargetServerID,
-		body.SourceDatabase, body.TargetDatabase, body.MigrateUsers)
+		body.SourceDatabase, body.TargetDatabase, body.MigrateUsers, body.CleanupSource)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Run migration in background
-	go h.runMigration(int(id), body.SourceServerID, body.TargetServerID, body.SourceDatabase, body.TargetDatabase, body.MigrateUsers)
+	go h.runMigration(int(id), body.SourceServerID, body.TargetServerID, body.SourceDatabase, body.TargetDatabase, body.MigrateUsers, body.CleanupSource)
 
 	m, _ := h.db.GetMigration(int(id))
 	writeJSON(w, http.StatusCreated, m)
 }
 
-func (h *Handlers) runMigration(migID, srcServerID, dstServerID int, srcDB, dstDB string, migrateUsers bool) {
+func (h *Handlers) runMigration(migID, srcServerID, dstServerID int, srcDB, dstDB string, migrateUsers, cleanupSource bool) {
 	now := time.Now()
 	_ = h.db.UpdateMigrationStatus(migID, "running", &now, nil)
 
@@ -105,8 +107,20 @@ func (h *Handlers) runMigration(migID, srcServerID, dstServerID int, srcDB, dstD
 	if runErr != nil {
 		logFn(fmt.Sprintf("[ERROR] Migration failed: %v", runErr))
 		_ = h.db.UpdateMigrationStatus(migID, "failed", &now, &completed)
-	} else {
-		_ = h.db.UpdateMigrationStatus(migID, "completed", &now, &completed)
+		return
+	}
+
+	_ = h.db.UpdateMigrationStatus(migID, "completed", &now, &completed)
+
+	if cleanupSource {
+		logFn("[INFO] Cleaning up source database and user...")
+		cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cleanCancel()
+		if err := pg.DropIsolatedSet(cleanCtx, *srcParams, srcDB, srcDB); err != nil {
+			logFn(fmt.Sprintf("[WARN] Cleanup failed (migration itself succeeded): %v", err))
+		} else {
+			logFn("[INFO] Source database and user removed.")
+		}
 	}
 }
 

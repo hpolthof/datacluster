@@ -97,5 +97,6 @@ CREATE TABLE IF NOT EXISTS migrations (
 	// Additive column migrations — SQLite has no IF NOT EXISTS for columns, ignore duplicate errors.
 	d.Exec(`ALTER TABLE servers ADD COLUMN relay_url TEXT NOT NULL DEFAULT ''`)
 	d.Exec(`ALTER TABLE servers ADD COLUMN relay_password_enc TEXT NOT NULL DEFAULT ''`)
+	d.Exec(`ALTER TABLE migrations ADD COLUMN cleanup_source INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }

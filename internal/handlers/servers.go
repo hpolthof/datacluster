@@ -228,6 +228,30 @@ func (h *Handlers) ListServerDatabases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dbs)
 }
 
+func (h *Handlers) GetServerInfo(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	params, err := h.serverConnParams(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	info, err := pg.GetServerInfo(ctx, *params)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 func (h *Handlers) serverConnParams(serverID int) (*pg.ConnParams, error) {

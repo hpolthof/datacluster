@@ -55,6 +55,7 @@ type Migration struct {
 	TargetServerName string     `json:"target_server_name,omitempty"`
 	TargetDatabase   string     `json:"target_database"`
 	MigrateUsers     bool       `json:"migrate_users"`
+	CleanupSource    bool       `json:"cleanup_source"`
 	Status           string     `json:"status"`
 	CreatedAt        time.Time  `json:"created_at"`
 	StartedAt        *time.Time `json:"started_at"`

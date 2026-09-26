@@ -53,6 +53,7 @@ func main() {
 		r.Delete("/api/servers/{id}", h.DeleteServer)
 		r.Post("/api/servers/{id}/test", h.TestServer)
 		r.Get("/api/servers/{id}/databases", h.ListServerDatabases)
+		r.Get("/api/servers/{id}/info", h.GetServerInfo)
 
 		r.Get("/api/databases", h.ListManagedDatabases)
 		r.Post("/api/databases", h.CreateManagedDatabase)

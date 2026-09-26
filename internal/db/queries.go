@@ -225,7 +225,7 @@ func (d *DB) ListMigrations() ([]Migration, error) {
 	rows, err := d.Query(`
 		SELECT m.id,m.name,m.source_server_id,ss.name,m.source_database,
 		       m.target_server_id,ts.name,m.target_database,
-		       m.migrate_users,m.status,m.created_at,m.started_at,m.completed_at,m.log
+		       m.migrate_users,m.cleanup_source,m.status,m.created_at,m.started_at,m.completed_at,m.log
 		FROM migrations m
 		LEFT JOIN servers ss ON ss.id=m.source_server_id
 		LEFT JOIN servers ts ON ts.id=m.target_server_id
@@ -237,13 +237,14 @@ func (d *DB) ListMigrations() ([]Migration, error) {
 	var list []Migration
 	for rows.Next() {
 		var m Migration
-		var migrateUsers int
+		var mu, cs int
 		if err := rows.Scan(&m.ID, &m.Name, &m.SourceServerID, &m.SourceServerName, &m.SourceDatabase,
 			&m.TargetServerID, &m.TargetServerName, &m.TargetDatabase,
-			&migrateUsers, &m.Status, &m.CreatedAt, &m.StartedAt, &m.CompletedAt, &m.Log); err != nil {
+			&mu, &cs, &m.Status, &m.CreatedAt, &m.StartedAt, &m.CompletedAt, &m.Log); err != nil {
 			return nil, err
 		}
-		m.MigrateUsers = migrateUsers == 1
+		m.MigrateUsers = mu == 1
+		m.CleanupSource = cs == 1
 		list = append(list, m)
 	}
 	if list == nil {
@@ -254,35 +255,39 @@ func (d *DB) ListMigrations() ([]Migration, error) {
 
 func (d *DB) GetMigration(id int) (*Migration, error) {
 	var m Migration
-	var migrateUsers int
+	var mu, cs int
 	err := d.QueryRow(`
 		SELECT m.id,m.name,m.source_server_id,ss.name,m.source_database,
 		       m.target_server_id,ts.name,m.target_database,
-		       m.migrate_users,m.status,m.created_at,m.started_at,m.completed_at,m.log
+		       m.migrate_users,m.cleanup_source,m.status,m.created_at,m.started_at,m.completed_at,m.log
 		FROM migrations m
 		LEFT JOIN servers ss ON ss.id=m.source_server_id
 		LEFT JOIN servers ts ON ts.id=m.target_server_id
 		WHERE m.id=?`, id).
 		Scan(&m.ID, &m.Name, &m.SourceServerID, &m.SourceServerName, &m.SourceDatabase,
 			&m.TargetServerID, &m.TargetServerName, &m.TargetDatabase,
-			&migrateUsers, &m.Status, &m.CreatedAt, &m.StartedAt, &m.CompletedAt, &m.Log)
+			&mu, &cs, &m.Status, &m.CreatedAt, &m.StartedAt, &m.CompletedAt, &m.Log)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	m.MigrateUsers = migrateUsers == 1
+	m.MigrateUsers = mu == 1
+	m.CleanupSource = cs == 1
 	return &m, nil
 }
 
-func (d *DB) CreateMigration(name string, srcServerID, dstServerID int, srcDB, dstDB string, migrateUsers bool) (int64, error) {
-	mu := 0
+func (d *DB) CreateMigration(name string, srcServerID, dstServerID int, srcDB, dstDB string, migrateUsers, cleanupSource bool) (int64, error) {
+	mu, cs := 0, 0
 	if migrateUsers {
 		mu = 1
 	}
-	res, err := d.Exec(`INSERT INTO migrations(name,source_server_id,source_database,target_server_id,target_database,migrate_users) VALUES(?,?,?,?,?,?)`,
-		name, srcServerID, srcDB, dstServerID, dstDB, mu)
+	if cleanupSource {
+		cs = 1
+	}
+	res, err := d.Exec(`INSERT INTO migrations(name,source_server_id,source_database,target_server_id,target_database,migrate_users,cleanup_source) VALUES(?,?,?,?,?,?,?)`,
+		name, srcServerID, srcDB, dstServerID, dstDB, mu, cs)
 	if err != nil {
 		return 0, err
 	}

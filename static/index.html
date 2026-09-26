@@ -138,6 +138,24 @@ select option{background:var(--surface2)}
 .hidden{display:none!important}
 .info-box{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:6px;padding:9px 13px;font-size:12.5px;color:var(--muted);margin-bottom:14px}
 .warn-box{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:9px 13px;font-size:12.5px;color:var(--yellow)}
+
+/* Server detail */
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.detail-kv{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
+.detail-kv-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:12px}
+.kv-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.04)}
+.kv-row:last-child{border-bottom:none}
+.kv-key{color:var(--muted);flex-shrink:0;margin-right:12px}
+.kv-val{color:var(--text);text-align:right;font-family:'Courier New',monospace;font-size:12.5px;word-break:break-all}
+.size-bar-wrap{display:flex;align-items:center;gap:8px}
+.size-bar{height:4px;border-radius:2px;background:rgba(99,102,241,.35);flex-shrink:0;min-width:2px}
+.tag{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:500}
+.tag-su{background:rgba(239,68,68,.15);color:var(--red)}
+.tag-login{background:rgba(34,197,94,.15);color:var(--green)}
+.tag-createdb{background:rgba(59,130,246,.15);color:var(--blue)}
+.tag-rep{background:rgba(245,158,11,.15);color:var(--yellow)}
+.section-sep{margin:20px 0 14px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px}
+.section-sep::after{content:'';flex:1;height:1px;background:var(--border)}
 </style>
 </head>
 <body>
@@ -263,6 +281,16 @@ function navigate(sec){
     .catch(e=>{ toast(e.message,'error'); c.innerHTML=`<div style="color:var(--red);padding:40px">${esc(e.message)}</div>`; });
 }
 
+function navigateServer(id, name){
+  clearTimers();
+  document.querySelectorAll('[data-s]').forEach(el=>el.classList.remove('active'));
+  document.querySelector('[data-s="servers"]')?.classList.add('active');
+  document.getElementById('pt').textContent = name||'Server detail';
+  const c = document.getElementById('mc');
+  c.innerHTML = `<div style="color:var(--muted);padding:40px">Loading...</div>`;
+  renderServerDetail(id).catch(e=>{ toast(e.message,'error'); c.innerHTML=`<div style="color:var(--red);padding:40px">${esc(e.message)}</div>`; });
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 async function renderDashboard(){
   const [stats,srvs] = await Promise.all([api('GET','/api/status'),api('GET','/api/servers')]);
@@ -309,13 +337,15 @@ async function renderServers(){
   mc.querySelectorAll('[data-test]').forEach(b=>b.addEventListener('click',()=>testSrv(+b.dataset.test)));
   mc.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editSrv(+b.dataset.edit)));
   mc.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>delSrv(+b.dataset.del)));
+  mc.querySelectorAll('.srv-link').forEach(a=>a.addEventListener('click',e=>{ e.preventDefault(); navigateServer(+a.dataset.sid, a.dataset.sname); }));
   const t = setInterval(()=>refreshStatuses(),30000);
   S.timers.push(t);
 }
 
 function srvRow(s){
   return `<tr id="sr-${s.id}">
-    <td><strong>${esc(s.name)}</strong>${s.relay_url?` <span style="font-size:11px;background:#1e293b;color:#94a3b8;border-radius:4px;padding:1px 5px">relay</span>`:''}</td><td class="mono">${esc(s.host)}:${s.port}</td>
+    <td><a href="#" class="srv-link" data-sid="${s.id}" data-sname="${esc(s.name)}" style="color:var(--text);text-decoration:none;font-weight:600">${esc(s.name)}</a>${s.relay_url?` <span style="font-size:11px;background:#1e293b;color:#94a3b8;border-radius:4px;padding:1px 5px">relay</span>`:''}</td>
+    <td class="mono">${esc(s.host)}:${s.port}</td>
     <td>${esc(s.admin_user)}</td><td class="text-muted">${s.ssl_mode}</td>
     <td id="ss-${s.id}">${badge(s.status)}</td><td class="text-muted">${fd(s.last_checked)}</td>
     <td><div class="ac">
@@ -393,6 +423,106 @@ async function delSrv(id){
   const s=S.servers.find(x=>x.id===id);
   if(!confirm(`Delete server "${s?.name}"?`)) return;
   try{ await api('DELETE',`/api/servers/${id}`); toast('Server deleted','success'); renderServers(); }catch(e){ toast(e.message,'error'); }
+}
+
+// ── Server detail ─────────────────────────────────────────────────────────────
+function fmtBytes(b){
+  if(b==null) return '—';
+  if(b<1024) return b+'B';
+  if(b<1048576) return (b/1024).toFixed(1)+'KB';
+  if(b<1073741824) return (b/1048576).toFixed(1)+'MB';
+  return (b/1073741824).toFixed(2)+'GB';
+}
+function fmtUptime(s){
+  if(!s) return '—';
+  const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60);
+  return [d&&d+'d',h&&h+'h',m+'m'].filter(Boolean).join(' ');
+}
+
+async function renderServerDetail(id){
+  const [srv, info] = await Promise.all([api('GET',`/api/servers/${id}`), api('GET',`/api/servers/${id}/info`)]);
+  const mc = document.getElementById('mc');
+  const maxSize = Math.max(...info.databases.map(d=>d.size_bytes),1);
+
+  mc.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">
+      <button class="btn btn-s btn-sm" id="back-srv"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg> Servers</button>
+      ${badge(srv.status)}
+      ${srv.relay_url?`<span style="font-size:11px;background:#1e293b;color:#94a3b8;border-radius:4px;padding:2px 7px">via relay</span>`:''}
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-kv">
+        <div class="detail-kv-title">Connection</div>
+        <div class="kv-row"><span class="kv-key">Host</span><span class="kv-val">${esc(srv.host)}:${srv.port}</span></div>
+        <div class="kv-row"><span class="kv-key">User</span><span class="kv-val">${esc(srv.admin_user)}</span></div>
+        <div class="kv-row"><span class="kv-key">SSL mode</span><span class="kv-val">${esc(srv.ssl_mode)}</span></div>
+        ${srv.relay_url?`<div class="kv-row"><span class="kv-key">Relay</span><span class="kv-val">${esc(srv.relay_url)}</span></div>`:''}
+      </div>
+      <div class="detail-kv">
+        <div class="detail-kv-title">Server stats</div>
+        <div class="kv-row"><span class="kv-key">Uptime</span><span class="kv-val">${fmtUptime(info.uptime_seconds)}</span></div>
+        <div class="kv-row"><span class="kv-key">Connections</span><span class="kv-val">${info.connections_active} / ${info.connections_max}</span></div>
+        <div class="kv-row"><span class="kv-key">Databases</span><span class="kv-val">${info.databases.length}</span></div>
+        <div class="kv-row"><span class="kv-key">Total size</span><span class="kv-val">${fmtBytes(info.databases.reduce((a,d)=>a+d.size_bytes,0))}</span></div>
+      </div>
+    </div>
+
+    <div class="section-sep">Databases</div>
+    <div class="table-wrap" style="margin-bottom:20px"><table>
+      <thead><tr><th>Name</th><th>Owner</th><th>Size</th><th>Connections</th><th>Collation</th></tr></thead>
+      <tbody>${info.databases.length===0?`<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">No databases</td></tr>`:
+        info.databases.map(d=>`<tr>
+          <td class="mono"><strong>${esc(d.name)}</strong></td>
+          <td class="text-muted">${esc(d.owner)}</td>
+          <td>
+            <div class="size-bar-wrap">
+              <span style="min-width:64px;text-align:right">${fmtBytes(d.size_bytes)}</span>
+              <div class="size-bar" style="width:${Math.max(4,Math.round(d.size_bytes/maxSize*80))}px"></div>
+            </div>
+          </td>
+          <td>${d.connections||'—'}</td>
+          <td class="text-muted" style="font-size:12px">${esc(d.collation||'—')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+
+    <div class="section-sep">Roles</div>
+    <div class="table-wrap" style="margin-bottom:20px"><table>
+      <thead><tr><th>Name</th><th>Attributes</th><th>Conn limit</th><th>Valid until</th></tr></thead>
+      <tbody>${info.roles.length===0?`<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No roles</td></tr>`:
+        info.roles.map(r=>`<tr>
+          <td class="mono">${esc(r.name)}</td>
+          <td style="display:flex;gap:4px;flex-wrap:wrap;padding-top:10px;padding-bottom:10px">
+            ${r.superuser?`<span class="tag tag-su">superuser</span>`:''}
+            ${r.can_login?`<span class="tag tag-login">login</span>`:''}
+            ${r.create_db?`<span class="tag tag-createdb">createdb</span>`:''}
+            ${r.create_role?`<span class="tag tag-createdb">createrole</span>`:''}
+            ${r.replication?`<span class="tag tag-rep">replication</span>`:''}
+            ${!r.superuser&&!r.can_login&&!r.create_db&&!r.create_role&&!r.replication?`<span style="color:var(--muted);font-size:12px">—</span>`:''}
+          </td>
+          <td class="text-muted">${r.conn_limit===-1?'unlimited':r.conn_limit}</td>
+          <td class="text-muted" style="font-size:12px">${r.valid_until||'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+
+    <div class="section-sep">Key settings</div>
+    <div class="detail-grid">
+      ${chunkSettings(info.settings).map(chunk=>`
+        <div class="detail-kv">
+          ${chunk.map(s=>`<div class="kv-row"><span class="kv-key">${esc(s.name)}</span><span class="kv-val">${esc(s.setting)}${s.unit?' '+esc(s.unit):''}</span></div>`).join('')}
+        </div>`).join('')}
+    </div>
+
+    <div style="margin-top:6px;font-size:11.5px;color:var(--muted)">${esc(info.version)}</div>`;
+
+  mc.querySelector('#back-srv').addEventListener('click',()=>navigate('servers'));
+}
+
+function chunkSettings(arr){
+  const half=Math.ceil(arr.length/2);
+  return arr.length?[arr.slice(0,half),arr.slice(half)]:[[],[]];
 }
 
 // ── Databases ─────────────────────────────────────────────────────────────────
@@ -500,35 +630,55 @@ function openMigModal(srvs){
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end">
         <div>
           <div class="fg"><label>Source server *</label><select id="mss"><option value="">Select...</option>${opts}</select></div>
-          <div class="fg"><label>Source database *</label><input id="msdb" placeholder="database name"></div>
+          <div class="fg"><label>Source database *</label>
+            <select id="msdb" disabled><option value="">— select server first —</option></select>
+          </div>
         </div>
         <div style="padding-bottom:14px;color:var(--muted);display:flex;align-items:center">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </div>
         <div>
           <div class="fg"><label>Target server *</label><select id="mds"><option value="">Select...</option>${opts}</select></div>
-          <div class="fg"><label>Target database *</label><input id="mddb" placeholder="database name"></div>
+          <div class="fg"><label>Target database *</label><input id="mddb" placeholder="database name (can be new)"></div>
         </div>
       </div>
       <div class="fg"><div class="cb-group"><input type="checkbox" id="mu" checked><label for="mu">Migrate user permissions</label></div></div>
+      <div class="fg"><div class="cb-group"><input type="checkbox" id="mclean"><label for="mclean">Delete source database &amp; user after successful migration</label></div></div>
       <div class="warn-box">⚠️ The target database must already exist. Existing tables will be overwritten.</div>
     </div>
     <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" id="msave">Start</button></div>
   </div>`);
-  const msdb=document.getElementById('msdb'), mddb=document.getElementById('mddb');
-  msdb.addEventListener('input',()=>{ if(!mddb._t) mddb.value=msdb.value; });
-  mddb.addEventListener('input',()=>{ mddb._t=true; });
+
+  const mss=document.getElementById('mss'), msdb=document.getElementById('msdb'), mddb=document.getElementById('mddb');
+
+  mss.addEventListener('change', async()=>{
+    const sid=+mss.value;
+    msdb.innerHTML='<option value="">Loading...</option>'; msdb.disabled=true;
+    if(!sid){ msdb.innerHTML='<option value="">— select server first —</option>'; return; }
+    try{
+      const dbs=await api('GET',`/api/servers/${sid}/databases`);
+      msdb.innerHTML='<option value="">Select database...</option>'+dbs.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+      msdb.disabled=false;
+    }catch(e){ msdb.innerHTML='<option value="">Failed to load</option>'; toast('Could not load databases: '+e.message,'error'); }
+  });
+
+  msdb.addEventListener('change',()=>{
+    if(msdb.value && !mddb._touched) mddb.value=msdb.value;
+  });
+  mddb.addEventListener('input',()=>{ mddb._touched=true; });
+
   document.getElementById('msave').addEventListener('click',startMig);
 }
 
 async function startMig(){
   const name=document.getElementById('mn').value.trim(), ss=+document.getElementById('mss').value,
     sdb=document.getElementById('msdb').value.trim(), ds=+document.getElementById('mds').value,
-    ddb=document.getElementById('mddb').value.trim(), mu=document.getElementById('mu').checked;
+    ddb=document.getElementById('mddb').value.trim(), mu=document.getElementById('mu').checked,
+    mclean=document.getElementById('mclean').checked;
   if(!ss||!sdb||!ds||!ddb){ toast('Please fill in all required fields','error'); return; }
   const btn=document.getElementById('msave'); btn.disabled=true; btn.textContent='Starting...';
   try{
-    await api('POST','/api/migrations',{name,source_server_id:ss,source_database:sdb,target_server_id:ds,target_database:ddb,migrate_users:mu});
+    await api('POST','/api/migrations',{name,source_server_id:ss,source_database:sdb,target_server_id:ds,target_database:ddb,migrate_users:mu,cleanup_source:mclean});
     toast('Migration started','success'); closeModal(); renderMigrations();
   }catch(e){ toast(e.message,'error'); btn.disabled=false; btn.textContent='Start'; }
 }
