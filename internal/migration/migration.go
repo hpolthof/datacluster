@@ -148,6 +148,10 @@ func copyTable(ctx context.Context, src, dst *pgx.Conn, table string) (int64, er
 
 // copySchema recreates the public schema DDL on the target.
 func copySchema(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
+	// Create enum / domain types first (tables may reference them)
+	if err := copyEnumTypes(ctx, src, dst); err != nil {
+		return fmt.Errorf("enum types: %w", err)
+	}
 	// Create sequences
 	if err := copySequences(ctx, src, dst); err != nil {
 		return fmt.Errorf("sequences: %w", err)
@@ -165,6 +169,37 @@ func copySchema(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
 		return fmt.Errorf("foreign keys: %w", err)
 	}
 	return nil
+}
+
+func copyEnumTypes(ctx context.Context, src, dst *pgx.Conn) error {
+	rows, err := src.Query(ctx, `
+		SELECT t.typname, array_agg(e.enumlabel ORDER BY e.enumsortorder)
+		FROM pg_type t
+		JOIN pg_enum e ON e.enumtypid = t.oid
+		JOIN pg_namespace n ON n.oid = t.typnamespace
+		WHERE n.nspname = 'public'
+		GROUP BY t.typname
+		ORDER BY t.typname`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var typeName string
+		var labels []string
+		if err := rows.Scan(&typeName, &labels); err != nil {
+			return err
+		}
+		quoted := make([]string, len(labels))
+		for i, l := range labels {
+			quoted[i] = "'" + strings.ReplaceAll(l, "'", "''") + "'"
+		}
+		ddl := fmt.Sprintf(`CREATE TYPE public.%s AS ENUM (%s)`, quoteIdent(typeName), strings.Join(quoted, ", "))
+		if _, err := dst.Exec(ctx, ddl); err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("create enum %s: %w", typeName, err)
+		}
+	}
+	return rows.Err()
 }
 
 func copySequences(ctx context.Context, src, dst *pgx.Conn) error {
@@ -215,7 +250,7 @@ func copyTables(ctx context.Context, src, dst *pgx.Conn) error {
 func buildCreateTable(ctx context.Context, conn *pgx.Conn, table string) (string, error) {
 	rows, err := conn.Query(ctx, `
 		SELECT column_name, data_type, character_maximum_length, is_nullable,
-		       column_default, numeric_precision, numeric_scale
+		       column_default, numeric_precision, numeric_scale, udt_name, udt_schema
 		FROM information_schema.columns
 		WHERE table_schema='public' AND table_name=$1
 		ORDER BY ordinal_position`, table)
@@ -226,15 +261,26 @@ func buildCreateTable(ctx context.Context, conn *pgx.Conn, table string) (string
 
 	var cols []string
 	for rows.Next() {
-		var colName, dataType, isNullable string
+		var colName, dataType, isNullable, udtName, udtSchema string
 		var charLen, numPrec, numScale *int
 		var colDefault *string
-		if err := rows.Scan(&colName, &dataType, &charLen, &isNullable, &colDefault, &numPrec, &numScale); err != nil {
+		if err := rows.Scan(&colName, &dataType, &charLen, &isNullable, &colDefault, &numPrec, &numScale, &udtName, &udtSchema); err != nil {
 			return "", err
 		}
 
 		typeDef := dataType
 		switch dataType {
+		case "USER-DEFINED":
+			// Enum or custom type — use the actual type name
+			if udtSchema == "public" || udtSchema == "" {
+				typeDef = quoteIdent(udtName)
+			} else {
+				typeDef = quoteIdent(udtSchema) + "." + quoteIdent(udtName)
+			}
+		case "ARRAY":
+			// Array of a base or user-defined type; udt_name is "_typename"
+			base := strings.TrimPrefix(udtName, "_")
+			typeDef = base + "[]"
 		case "character varying":
 			if charLen != nil {
 				typeDef = fmt.Sprintf("varchar(%d)", *charLen)
