@@ -10,6 +10,12 @@ import (
 	"datacluster/internal/relay"
 )
 
+// passthroughLookup returns the hostname as-is so pgconn skips local DNS
+// resolution. The relay DialFunc handles the actual network address.
+func passthroughLookup(_ context.Context, host string) ([]string, error) {
+	return []string{host}, nil
+}
+
 type ConnParams struct {
 	Host       string
 	Port       int
@@ -36,6 +42,7 @@ func Connect(ctx context.Context, p ConnParams, database string) (*pgx.Conn, err
 	}
 	if p.RelayURL != "" && p.RelayToken != "" {
 		config.Config.DialFunc = relay.DialFunc(p.RelayURL, p.RelayToken)
+		config.Config.LookupFunc = passthroughLookup
 	}
 	return pgx.ConnectConfig(ctx, config)
 }
