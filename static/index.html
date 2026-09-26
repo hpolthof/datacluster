@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataCluster</title>
+<style>
+:root {
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#232738;--border:#2d3148;
+  --text:#e2e8f0;--muted:#64748b;--accent:#6366f1;--accent-h:#818cf8;
+  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--blue:#3b82f6;
+  --r:8px;--sw:220px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;height:100vh;overflow:hidden}
+
+/* Login */
+#login-screen{display:flex;align-items:center;justify-content:center;height:100vh}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:48px 40px;width:380px;text-align:center}
+.login-logo{font-size:26px;font-weight:700;color:var(--accent);letter-spacing:-1px;margin-bottom:4px}
+.login-sub{color:var(--muted);font-size:13px;margin-bottom:32px}
+
+/* Layout */
+#app{display:flex;height:100vh}
+.sidebar{width:var(--sw);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-logo{padding:18px 20px 14px;font-size:17px;font-weight:700;color:var(--accent);letter-spacing:-0.5px;border-bottom:1px solid var(--border)}
+.sidebar-logo span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+.sidebar-nav{flex:1;padding:10px 8px;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;cursor:pointer;color:var(--muted);font-size:13.5px;transition:all .15s;margin-bottom:2px;user-select:none}
+.nav-item:hover{background:var(--surface2);color:var(--text)}
+.nav-item.active{background:rgba(99,102,241,.15);color:var(--accent)}
+.nav-icon{width:16px;height:16px;flex-shrink:0}
+.sidebar-footer{padding:10px 8px;border-top:1px solid var(--border)}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{height:54px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;flex-shrink:0}
+.topbar-title{font-size:15px;font-weight:600}
+.content{flex:1;overflow-y:auto;padding:24px}
+
+/* Stat cards */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px;display:flex;align-items:center;gap:14px}
+.stat-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.si-a{background:rgba(99,102,241,.15);color:var(--accent)}
+.si-g{background:rgba(34,197,94,.15);color:var(--green)}
+.si-b{background:rgba(59,130,246,.15);color:var(--blue)}
+.si-y{background:rgba(245,158,11,.15);color:var(--yellow)}
+.stat-value{font-size:28px;font-weight:700;line-height:1;margin-bottom:3px}
+.stat-label{color:var(--muted);font-size:12px}
+
+/* Table */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-title{font-size:14px;font-weight:600}
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+table{width:100%;border-collapse:collapse}
+thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface2)}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--border);font-size:13.5px}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.015)}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:100px;font-size:11.5px;font-weight:500}
+.bd{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.b-online{background:rgba(34,197,94,.15);color:var(--green)}.b-online .bd{background:var(--green)}
+.b-offline{background:rgba(239,68,68,.15);color:var(--red)}.b-offline .bd{background:var(--red)}
+.b-unknown{background:rgba(100,116,139,.15);color:var(--muted)}.b-unknown .bd{background:var(--muted)}
+.b-pending{background:rgba(245,158,11,.15);color:var(--yellow)}.b-pending .bd{background:var(--yellow)}
+.b-running{background:rgba(59,130,246,.15);color:var(--blue)}.b-running .bd{background:var(--blue);animation:pulse 1.2s ease-in-out infinite}
+.b-completed{background:rgba(34,197,94,.15);color:var(--green)}.b-completed .bd{background:var(--green)}
+.b-failed{background:rgba(239,68,68,.15);color:var(--red)}.b-failed .bd{background:var(--red)}
+.b-primary{background:rgba(99,102,241,.15);color:var(--accent)}
+.b-replica{background:rgba(100,116,139,.15);color:var(--muted)}
+.b-logical{background:rgba(59,130,246,.15);color:var(--blue)}
+.b-streaming{background:rgba(245,158,11,.15);color:var(--yellow)}
+.b-manual{background:rgba(100,116,139,.15);color:var(--muted)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+.btn-p{background:var(--accent);color:#fff}.btn-p:hover{background:var(--accent-h)}
+.btn-s{background:var(--surface2);color:var(--text);border:1px solid var(--border)}.btn-s:hover{background:#2d3350}
+.btn-d{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.2)}.btn-d:hover{background:rgba(239,68,68,.22)}
+.btn-g{background:transparent;color:var(--muted);padding:5px 8px}.btn-g:hover{color:var(--text);background:var(--surface2)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* Forms */
+.fg{margin-bottom:14px}
+label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:5px}
+input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13.5px;padding:8px 12px;outline:none;transition:border-color .15s;font-family:inherit}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+input::placeholder{color:var(--muted)}
+select option{background:var(--surface2)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cb-group{display:flex;align-items:center;gap:8px}
+.cb-group input[type=checkbox]{width:16px;height:16px;padding:0;accent-color:var(--accent)}
+.cb-group label{margin:0;color:var(--text);cursor:pointer;font-size:13.5px}
+
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(2px)}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:480px;max-width:calc(100vw - 32px);max-height:calc(100vh - 64px);display:flex;flex-direction:column}
+.modal-lg{width:640px}
+.modal-h{padding:18px 22px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.modal-title{font-size:15px;font-weight:600}
+.modal-b{padding:18px 22px;overflow-y:auto;flex:1}
+.modal-f{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0}
+.btn-x{background:none;border:none;cursor:pointer;color:var(--muted);padding:3px;border-radius:4px;display:flex;align-items:center}
+.btn-x:hover{color:var(--text);background:var(--surface2)}
+
+/* Toast */
+#tc{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:11px 15px;font-size:13px;max-width:300px;pointer-events:all;animation:tIn .2s ease;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.toast.ok{border-left:3px solid var(--green)}.toast.er{border-left:3px solid var(--red)}.toast.inf{border-left:3px solid var(--blue)}
+@keyframes tIn{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* Cluster cards */
+.cluster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px}
+.cc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px}
+.cc-hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.cc-name{font-size:15px;font-weight:600;margin-bottom:3px}
+.cc-desc{font-size:12.5px;color:var(--muted)}
+.member-list{border-top:1px solid var(--border);padding-top:12px;margin-top:4px}
+.member-item{display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:13px}
+.mi-name{display:flex;align-items:center;gap:8px}
+
+/* Log */
+.log-out{background:#0a0c14;border:1px solid var(--border);border-radius:6px;padding:14px;font-family:'Courier New',monospace;font-size:12px;line-height:1.6;color:#a0aec0;white-space:pre-wrap;word-break:break-all;max-height:380px;overflow-y:auto;min-height:80px}
+
+/* Empty */
+.empty{text-align:center;padding:56px 24px;color:var(--muted)}
+.empty-icon{font-size:38px;margin-bottom:10px;opacity:.4}
+.empty h3{font-size:15px;color:var(--text);margin-bottom:5px}
+.empty p{font-size:13px}
+
+/* Misc */
+.text-muted{color:var(--muted)}
+.mono{font-family:'Courier New',monospace;font-size:12.5px}
+.ac{display:flex;gap:4px}
+.hidden{display:none!important}
+.info-box{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:6px;padding:9px 13px;font-size:12.5px;color:var(--muted);margin-bottom:14px}
+.warn-box{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:9px 13px;font-size:12.5px;color:var(--yellow)}
+</style>
+</head>
+<body>
+<div id="tc"></div>
+
+<!-- Login -->
+<div id="login-screen" class="hidden">
+  <div class="login-card">
+    <div class="login-logo">DataCluster</div>
+    <div class="login-sub">PostgreSQL Management</div>
+    <div class="fg"><input type="password" id="lp" placeholder="Access password" autofocus></div>
+    <button class="btn btn-p" style="width:100%;justify-content:center" id="lb">Sign in</button>
+    <div id="le" class="hidden" style="margin-top:10px;color:var(--red);font-size:13px">Invalid password</div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <aside class="sidebar">
+    <div class="sidebar-logo">DataCluster<span>PostgreSQL Management</span></div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" data-s="dashboard">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-s="servers">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
+        Servers
+      </div>
+      <div class="nav-item" data-s="databases">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/></svg>
+        Databases
+      </div>
+      <div class="nav-item" data-s="migrations">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        Migrations
+      </div>
+      <div class="nav-item" data-s="clusters">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.7 10.7l6.6-4.4M8.7 13.3l6.6 4.4"/></svg>
+        Clusters
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="nav-item" id="logout-btn">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Sign out
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title" id="pt">Dashboard</div>
+    </div>
+    <div class="content" id="mc"></div>
+  </div>
+</div>
+<div id="mr"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+const S = { token: localStorage.getItem('dc_token')||'', servers:[], timers:[] };
+
+// ── API ───────────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers:{'Content-Type':'application/json'} };
+  if (S.token) opts.headers['Authorization'] = `Bearer ${S.token}`;
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (r.status === 401) { logout(); throw new Error('Session expired'); }
+  if (!r.ok) {
+    let m; try { const d=await r.json(); m=d.error||d.message||JSON.stringify(d); } catch { m=`HTTP ${r.status}`; }
+    throw new Error(m);
+  }
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type='inf') {
+  const c = document.getElementById('tc');
+  const el = document.createElement('div');
+  el.className = `toast ${type==='success'?'ok':type==='error'?'er':'inf'}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(()=>{ el.style.transition='opacity .3s'; el.style.opacity='0'; setTimeout(()=>el.remove(),300); }, 4000);
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function openModal(html) {
+  const r = document.getElementById('mr');
+  r.innerHTML = `<div class="overlay" id="ao">${html}</div>`;
+  r.querySelector('#ao').addEventListener('click', e=>{ if(e.target.id==='ao') closeModal(); });
+}
+function closeModal() { document.getElementById('mr').innerHTML=''; clearInterval(window._lp); }
+const X_BTN = `<button class="btn-x" onclick="closeModal()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>`;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s){ if(s==null)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fd(d){ if(!d)return'—'; return new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function badge(st){
+  const L={online:'Online',offline:'Offline',unknown:'Unknown',pending:'Pending',running:'Running',completed:'Completed',failed:'Failed'};
+  return `<span class="badge b-${st||'unknown'}"><span class="bd"></span>${L[st]||st}</span>`;
+}
+function roleBadge(r){ return `<span class="badge b-${r}">${r==='primary'?'Primary':'Replica'}</span>`; }
+function rtBadge(t){ return `<span class="badge b-${t}">${t}</span>`; }
+function empty(icon,h,p){ return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${h}</h3><p>${p}</p></div>`; }
+function countUp(el,n,ms=600){
+  const t0=performance.now();
+  const tick=now=>{ const t=Math.min((now-t0)/ms,1); el.textContent=Math.round(t*n); if(t<1)requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}
+function clearTimers(){ S.timers.forEach(clearInterval); S.timers=[]; }
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+const TITLES={dashboard:'Dashboard',servers:'Servers',databases:'Databases',migrations:'Migrations',clusters:'Clusters'};
+function navigate(sec){
+  clearTimers();
+  document.querySelectorAll('[data-s]').forEach(el=>el.classList.toggle('active',el.dataset.s===sec));
+  document.getElementById('pt').textContent = TITLES[sec]||sec;
+  const c = document.getElementById('mc');
+  c.innerHTML = `<div style="color:var(--muted);padding:40px">Loading...</div>`;
+  (sec==='dashboard'?renderDashboard():sec==='servers'?renderServers():sec==='databases'?renderDatabases():sec==='migrations'?renderMigrations():renderClusters())
+    .catch(e=>{ toast(e.message,'error'); c.innerHTML=`<div style="color:var(--red);padding:40px">${esc(e.message)}</div>`; });
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+async function renderDashboard(){
+  const [stats,srvs] = await Promise.all([api('GET','/api/status'),api('GET','/api/servers')]);
+  const recent = [...srvs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,5);
+  document.getElementById('mc').innerHTML = `
+    <div class="stat-grid">
+      ${[['sc-s','si-a','Servers','<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/>'],
+         ['sc-d','si-g','Databases','<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/>'],
+         ['sc-c','si-b','Clusters','<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.7 10.7l6.6-4.4M8.7 13.3l6.6 4.4"/>'],
+         ['sc-m','si-y','Active migrations','<path d="M5 12h14M12 5l7 7-7 7"/>']]
+        .map(([id,ic,lbl,svg])=>`<div class="stat-card"><div class="stat-icon ${ic}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${svg}</svg></div><div><div class="stat-value" id="${id}">0</div><div class="stat-label">${lbl}</div></div></div>`).join('')}
+    </div>
+    <div class="section-header"><div class="section-title">Recent servers</div></div>
+    ${recent.length===0?empty('🖥️','No servers','Add a server to get started'):`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Host:Port</th><th>Status</th><th>Created</th></tr></thead>
+      <tbody>${recent.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td class="mono">${esc(s.host)}:${s.port}</td><td>${badge(s.status)}</td><td class="text-muted">${fd(s.created_at)}</td></tr>`).join('')}</tbody>
+    </table></div>`}`;
+  countUp(document.getElementById('sc-s'),stats.servers);
+  countUp(document.getElementById('sc-d'),stats.databases);
+  countUp(document.getElementById('sc-c'),stats.clusters);
+  countUp(document.getElementById('sc-m'),stats.migrations_active);
+}
+
+// ── Servers ───────────────────────────────────────────────────────────────────
+async function renderServers(){
+  const srvs = await api('GET','/api/servers');
+  S.servers = srvs;
+  const mc = document.getElementById('mc');
+  mc.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">All servers (${srvs.length})</div>
+      <button class="btn btn-p" id="add-srv">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        Add server
+      </button>
+    </div>
+    ${srvs.length===0?empty('🖥️','No servers','Add a PostgreSQL server to get started'):`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Host:Port</th><th>User</th><th>SSL</th><th>Status</th><th>Last checked</th><th>Actions</th></tr></thead>
+      <tbody id="srv-tbody">${srvs.map(srvRow).join('')}</tbody>
+    </table></div>`}`;
+  mc.querySelector('#add-srv')?.addEventListener('click',()=>openSrvModal());
+  mc.querySelectorAll('[data-test]').forEach(b=>b.addEventListener('click',()=>testSrv(+b.dataset.test)));
+  mc.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editSrv(+b.dataset.edit)));
+  mc.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>delSrv(+b.dataset.del)));
+  const t = setInterval(()=>refreshStatuses(),30000);
+  S.timers.push(t);
+}
+
+function srvRow(s){
+  return `<tr id="sr-${s.id}">
+    <td><strong>${esc(s.name)}</strong></td><td class="mono">${esc(s.host)}:${s.port}</td>
+    <td>${esc(s.admin_user)}</td><td class="text-muted">${s.ssl_mode}</td>
+    <td id="ss-${s.id}">${badge(s.status)}</td><td class="text-muted">${fd(s.last_checked)}</td>
+    <td><div class="ac">
+      <button class="btn btn-g btn-sm" data-test="${s.id}">Test</button>
+      <button class="btn btn-g btn-sm" data-edit="${s.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+      <button class="btn btn-g btn-sm" data-del="${s.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+    </div></td>
+  </tr>`;
+}
+
+async function testSrv(id){
+  try {
+    const r = await api('POST',`/api/servers/${id}/test`);
+    toast(`Connected: ${r.version}`,'success');
+    const el=document.getElementById(`ss-${id}`); if(el) el.innerHTML=badge('online');
+  } catch(e){ toast(`Test failed: ${e.message}`,'error'); const el=document.getElementById(`ss-${id}`); if(el) el.innerHTML=badge('offline'); }
+}
+async function refreshStatuses(){ for(const s of S.servers) try{ await api('POST',`/api/servers/${s.id}/test`); const el=document.getElementById(`ss-${s.id}`); if(el) el.innerHTML=badge('online'); }catch{ const el=document.getElementById(`ss-${s.id}`); if(el) el.innerHTML=badge('offline'); } }
+
+function openSrvModal(srv=null){
+  const e=srv||{};
+  openModal(`<div class="modal">
+    <div class="modal-h"><div class="modal-title">${srv?'Edit server':'Add server'}</div>${X_BTN}</div>
+    <div class="modal-b">
+      <div class="fg"><label>Name *</label><input id="sn" value="${esc(e.name||'')}"></div>
+      <div class="form-row fg">
+        <div><label>Host *</label><input id="sh" placeholder="localhost" value="${esc(e.host||'')}"></div>
+        <div><label>Port</label><input type="number" id="sp" value="${e.port||5432}"></div>
+      </div>
+      <div class="form-row fg">
+        <div><label>Admin user *</label><input id="su" placeholder="postgres" value="${esc(e.admin_user||'')}"></div>
+        <div><label>Password ${srv?'(blank = keep current)':'*'}</label><input type="password" id="sw" placeholder="${srv?'••••':'password'}"></div>
+      </div>
+      <div class="fg"><label>SSL mode</label><select id="ssl">
+        <option value="prefer"${(e.ssl_mode||'prefer')==='prefer'?' selected':''}>prefer</option>
+        <option value="require"${e.ssl_mode==='require'?' selected':''}>require</option>
+        <option value="disable"${e.ssl_mode==='disable'?' selected':''}>disable</option>
+      </select></div>
+      <div class="fg"><label>Notes</label><textarea id="snotes" rows="2">${esc(e.notes||'')}</textarea></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-s" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-p" id="ssave">${srv?'Save':'Add'}</button>
+    </div>
+  </div>`);
+  document.getElementById('ssave').addEventListener('click',()=>saveSrv(srv?.id));
+  document.getElementById('sn').focus();
+}
+
+async function saveSrv(id){
+  const name=document.getElementById('sn').value.trim(), host=document.getElementById('sh').value.trim(),
+    port=+document.getElementById('sp').value||5432, user=document.getElementById('su').value.trim(),
+    pass=document.getElementById('sw').value, ssl=document.getElementById('ssl').value,
+    notes=document.getElementById('snotes').value.trim();
+  if(!name||!host||!user||(!id&&!pass)){ toast('Please fill in all required fields','error'); return; }
+  const body={name,host,port,admin_user:user,ssl_mode:ssl,notes}; if(pass) body.admin_password=pass;
+  try {
+    id ? await api('PUT',`/api/servers/${id}`,body) : await api('POST','/api/servers',body);
+    toast(id?'Server updated':'Server added','success');
+    closeModal(); renderServers();
+  } catch(e){ toast(e.message,'error'); }
+}
+
+async function editSrv(id){ const s=await api('GET',`/api/servers/${id}`); openSrvModal(s); }
+async function delSrv(id){
+  const s=S.servers.find(x=>x.id===id);
+  if(!confirm(`Delete server "${s?.name}"?`)) return;
+  try{ await api('DELETE',`/api/servers/${id}`); toast('Server deleted','success'); renderServers(); }catch(e){ toast(e.message,'error'); }
+}
+
+// ── Databases ─────────────────────────────────────────────────────────────────
+async function renderDatabases(){
+  const [dbs,srvs] = await Promise.all([api('GET','/api/databases'),api('GET','/api/servers')]);
+  S.servers=srvs;
+  const mc=document.getElementById('mc');
+  mc.innerHTML=`
+    <div class="section-header">
+      <div class="section-title">Managed databases (${dbs.length})</div>
+      <button class="btn btn-p" id="add-db"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Create database</button>
+    </div>
+    ${dbs.length===0?empty('🗄️','No databases','Create an isolated database set'):`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Database</th><th>Owner</th><th>Server</th><th>Created</th><th>Notes</th><th>Actions</th></tr></thead>
+      <tbody>${dbs.map(d=>`<tr>
+        <td><strong class="mono">${esc(d.database_name)}</strong></td>
+        <td class="mono">${esc(d.owner_user)}</td><td>${esc(d.server_name)}</td>
+        <td class="text-muted">${fd(d.created_at)}</td><td class="text-muted">${esc(d.notes)||'—'}</td>
+        <td><button class="btn btn-g btn-sm" data-ddb="${d.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg> Delete</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`}`;
+  mc.querySelector('#add-db')?.addEventListener('click',()=>openDbModal(srvs));
+  mc.querySelectorAll('[data-ddb]').forEach(b=>b.addEventListener('click',()=>delDb(+b.dataset.ddb,dbs)));
+}
+
+function openDbModal(srvs){
+  const opts=srvs.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.host)})</option>`).join('');
+  openModal(`<div class="modal">
+    <div class="modal-h"><div class="modal-title">Create database set</div>${X_BTN}</div>
+    <div class="modal-b">
+      <div class="info-box">The username and database share the same name and are fully isolated from all other databases on the server.</div>
+      <div class="fg"><label>Server *</label><select id="ds">${srvs.length?'<option value="">Select server...</option>'+opts:'<option value="">No servers available</option>'}</select></div>
+      <div class="fg"><label>Database name *</label><input id="dn" placeholder="e.g. my_app"></div>
+      <div class="fg"><label>Username *</label><input id="du" placeholder="auto-filled from database name"></div>
+      <div class="fg"><label>Password *</label><input type="password" id="dp" placeholder="strong password"></div>
+      <div class="fg"><label>Notes</label><textarea id="dnotes" rows="2"></textarea></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" id="dsave">Create</button></div>
+  </div>`);
+  const dn=document.getElementById('dn'), du=document.getElementById('du');
+  dn.addEventListener('input',()=>{ if(!du._t) du.value=dn.value.replace(/[^a-zA-Z0-9_]/g,'_'); });
+  du.addEventListener('input',()=>{ du._t=true; });
+  document.getElementById('dsave').addEventListener('click',createDb);
+  dn.focus();
+}
+
+async function createDb(){
+  const srv=+document.getElementById('ds').value, name=document.getElementById('dn').value.trim(),
+    user=document.getElementById('du').value.trim(), pass=document.getElementById('dp').value,
+    notes=document.getElementById('dnotes').value.trim();
+  if(!srv||!name||!user||!pass){ toast('Please fill in all required fields','error'); return; }
+  const btn=document.getElementById('dsave'); btn.disabled=true; btn.textContent='Creating...';
+  try{
+    await api('POST','/api/databases',{server_id:srv,database_name:name,owner_user:user,owner_password:pass,notes});
+    toast(`Database "${name}" created`,'success'); closeModal(); renderDatabases();
+  }catch(e){ toast(e.message,'error'); btn.disabled=false; btn.textContent='Create'; }
+}
+
+async function delDb(id,dbs){
+  const d=dbs.find(x=>x.id===id);
+  if(!confirm(`Permanently delete database "${d?.database_name}" and user "${d?.owner_user}"?\n\nThis cannot be undone.`)) return;
+  try{ await api('DELETE',`/api/databases/${id}`); toast('Database deleted','success'); renderDatabases(); }catch(e){ toast(e.message,'error'); }
+}
+
+// ── Migrations ────────────────────────────────────────────────────────────────
+async function renderMigrations(){
+  const [migs,srvs] = await Promise.all([api('GET','/api/migrations'),api('GET','/api/servers')]);
+  S.servers=srvs;
+  const mc=document.getElementById('mc');
+  mc.innerHTML=`
+    <div class="section-header">
+      <div class="section-title">Migrations (${migs.length})</div>
+      <button class="btn btn-p" id="add-mig"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> New migration</button>
+    </div>
+    ${migs.length===0?empty('📦','No migrations','Move data between PostgreSQL servers'):`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Source</th><th>Target</th><th>Users</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody>${migs.map(m=>`<tr>
+        <td><strong>${esc(m.name)||'—'}</strong></td>
+        <td class="mono" style="font-size:12px">${esc(m.source_server_name||'?')}/<strong>${esc(m.source_database)}</strong></td>
+        <td class="mono" style="font-size:12px">${esc(m.target_server_name||'?')}/<strong>${esc(m.target_database)}</strong></td>
+        <td>${m.migrate_users?'✓':'—'}</td>
+        <td>${badge(m.status)}</td><td class="text-muted">${fd(m.created_at)}</td>
+        <td><div class="ac">
+          <button class="btn btn-g btn-sm" data-mlog="${m.id}">Log</button>
+          <button class="btn btn-g btn-sm" data-mdel="${m.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+        </div></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`}`;
+  mc.querySelector('#add-mig')?.addEventListener('click',()=>openMigModal(srvs));
+  mc.querySelectorAll('[data-mlog]').forEach(b=>b.addEventListener('click',()=>openMigLog(+b.dataset.mlog)));
+  mc.querySelectorAll('[data-mdel]').forEach(b=>b.addEventListener('click',()=>delMig(+b.dataset.mdel,migs)));
+  if(migs.some(m=>['running','pending'].includes(m.status))){
+    S.timers.push(setInterval(()=>renderMigrations(),5000));
+  }
+}
+
+function openMigModal(srvs){
+  const opts=srvs.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  openModal(`<div class="modal">
+    <div class="modal-h"><div class="modal-title">New migration</div>${X_BTN}</div>
+    <div class="modal-b">
+      <div class="fg"><label>Name (optional)</label><input id="mn" placeholder="e.g. v2 production migration"></div>
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end">
+        <div>
+          <div class="fg"><label>Source server *</label><select id="mss"><option value="">Select...</option>${opts}</select></div>
+          <div class="fg"><label>Source database *</label><input id="msdb" placeholder="database name"></div>
+        </div>
+        <div style="padding-bottom:14px;color:var(--muted);display:flex;align-items:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </div>
+        <div>
+          <div class="fg"><label>Target server *</label><select id="mds"><option value="">Select...</option>${opts}</select></div>
+          <div class="fg"><label>Target database *</label><input id="mddb" placeholder="database name"></div>
+        </div>
+      </div>
+      <div class="fg"><div class="cb-group"><input type="checkbox" id="mu" checked><label for="mu">Migrate user permissions</label></div></div>
+      <div class="warn-box">⚠️ The target database must already exist. Existing tables will be overwritten.</div>
+    </div>
+    <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" id="msave">Start</button></div>
+  </div>`);
+  const msdb=document.getElementById('msdb'), mddb=document.getElementById('mddb');
+  msdb.addEventListener('input',()=>{ if(!mddb._t) mddb.value=msdb.value; });
+  mddb.addEventListener('input',()=>{ mddb._t=true; });
+  document.getElementById('msave').addEventListener('click',startMig);
+}
+
+async function startMig(){
+  const name=document.getElementById('mn').value.trim(), ss=+document.getElementById('mss').value,
+    sdb=document.getElementById('msdb').value.trim(), ds=+document.getElementById('mds').value,
+    ddb=document.getElementById('mddb').value.trim(), mu=document.getElementById('mu').checked;
+  if(!ss||!sdb||!ds||!ddb){ toast('Please fill in all required fields','error'); return; }
+  const btn=document.getElementById('msave'); btn.disabled=true; btn.textContent='Starting...';
+  try{
+    await api('POST','/api/migrations',{name,source_server_id:ss,source_database:sdb,target_server_id:ds,target_database:ddb,migrate_users:mu});
+    toast('Migration started','success'); closeModal(); renderMigrations();
+  }catch(e){ toast(e.message,'error'); btn.disabled=false; btn.textContent='Start'; }
+}
+
+async function openMigLog(id){
+  const m=await api('GET',`/api/migrations/${id}`);
+  openModal(`<div class="modal modal-lg">
+    <div class="modal-h">
+      <div class="modal-title">Log — ${esc(m.name||'#'+id)}</div>
+      <div style="display:flex;align-items:center;gap:10px">${badge(m.status)}${X_BTN}</div>
+    </div>
+    <div class="modal-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;font-size:12.5px;color:var(--muted)">
+        <div>Source: <strong style="color:var(--text)">${esc(m.source_server_name||'?')}/${esc(m.source_database)}</strong></div>
+        <div>Target: <strong style="color:var(--text)">${esc(m.target_server_name||'?')}/${esc(m.target_database)}</strong></div>
+        <div>Started: <strong style="color:var(--text)">${fd(m.started_at)}</strong></div>
+        <div>Completed: <strong style="color:var(--text)">${fd(m.completed_at)}</strong></div>
+      </div>
+      <pre class="log-out" id="mlog">${esc(m.log||'(no log yet)')}</pre>
+    </div>
+    <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Close</button></div>
+  </div>`);
+  const el=document.getElementById('mlog'); el.scrollTop=el.scrollHeight;
+  if(['running','pending'].includes(m.status)){
+    window._lp=setInterval(async()=>{
+      try{
+        const u=await api('GET',`/api/migrations/${id}`);
+        const e=document.getElementById('mlog');
+        if(e){ e.textContent=u.log||'(no log yet)'; e.scrollTop=e.scrollHeight; }
+        if(!['running','pending'].includes(u.status)) clearInterval(window._lp);
+      }catch{ clearInterval(window._lp); }
+    },2000);
+  }
+}
+
+async function delMig(id,migs){
+  const m=migs.find(x=>x.id===id);
+  if(['running','pending'].includes(m?.status)){ toast('Cannot delete a running migration','error'); return; }
+  if(!confirm('Delete this migration?')) return;
+  try{ await api('DELETE',`/api/migrations/${id}`); toast('Migration deleted','success'); renderMigrations(); }catch(e){ toast(e.message,'error'); }
+}
+
+// ── Clusters ──────────────────────────────────────────────────────────────────
+async function renderClusters(){
+  const [cls,srvs] = await Promise.all([api('GET','/api/clusters'),api('GET','/api/servers')]);
+  S.servers=srvs;
+  const mc=document.getElementById('mc');
+  mc.innerHTML=`
+    <div class="section-header">
+      <div class="section-title">Server clusters (${cls.length})</div>
+      <button class="btn btn-p" id="add-cl"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> New cluster</button>
+    </div>
+    ${cls.length===0?empty('🔗','No clusters','Link servers together for replication or mirroring'):
+      `<div class="cluster-grid">${cls.map(clCard).join('')}</div>`}`;
+  mc.querySelector('#add-cl')?.addEventListener('click',()=>openClModal());
+  mc.querySelectorAll('[data-ced]').forEach(b=>b.addEventListener('click',()=>openClModal(cls.find(c=>c.id===+b.dataset.ced))));
+  mc.querySelectorAll('[data-cdel]').forEach(b=>b.addEventListener('click',()=>delCl(+b.dataset.cdel,cls)));
+  mc.querySelectorAll('[data-cam]').forEach(b=>b.addEventListener('click',()=>openAddMember(+b.dataset.cam,srvs)));
+  mc.querySelectorAll('[data-crm]').forEach(b=>{
+    const [cid,sid]=b.dataset.crm.split(',').map(Number);
+    b.addEventListener('click',()=>removeMember(cid,sid));
+  });
+}
+
+function clCard(cl){
+  return `<div class="cc">
+    <div class="cc-hd">
+      <div>
+        <div class="cc-name">${esc(cl.name)}</div>
+        <div class="cc-desc">${esc(cl.description)||'<span style="color:var(--muted)">No description</span>'}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        ${rtBadge(cl.replication_type)}
+        <button class="btn btn-g btn-sm" data-ced="${cl.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        <button class="btn btn-g btn-sm" data-cdel="${cl.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+      </div>
+    </div>
+    <div class="member-list">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px">Members (${cl.members.length})</div>
+      ${cl.members.length===0?`<div style="color:var(--muted);font-size:12.5px">No servers added yet</div>`:
+        cl.members.map(m=>`<div class="member-item">
+          <div class="mi-name">${roleBadge(m.role)}<span>${esc(m.server_name)}</span><span class="text-muted mono" style="font-size:11px">${esc(m.server_host)}</span></div>
+          <button class="btn btn-g btn-sm" data-crm="${cl.id},${m.server_id}" style="color:var(--red);padding:2px 5px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        </div>`).join('')}
+      <div style="margin-top:10px"><button class="btn btn-s btn-sm" data-cam="${cl.id}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add server</button></div>
+    </div>
+  </div>`;
+}
+
+function openClModal(cl=null){
+  openModal(`<div class="modal">
+    <div class="modal-h"><div class="modal-title">${cl?'Edit cluster':'New cluster'}</div>${X_BTN}</div>
+    <div class="modal-b">
+      <div class="fg"><label>Name *</label><input id="cn" value="${esc(cl?.name||'')}"></div>
+      <div class="fg"><label>Description</label><textarea id="cd" rows="2">${esc(cl?.description||'')}</textarea></div>
+      <div class="fg"><label>Replication type</label><select id="ct">
+        <option value="logical"${(cl?.replication_type||'logical')==='logical'?' selected':''}>logical — publication/subscription</option>
+        <option value="streaming"${cl?.replication_type==='streaming'?' selected':''}>streaming — WAL streaming</option>
+        <option value="manual"${cl?.replication_type==='manual'?' selected':''}>manual — configure manually</option>
+      </select></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" id="csave">${cl?'Save':'Create'}</button></div>
+  </div>`);
+  document.getElementById('csave').addEventListener('click',()=>saveCl(cl?.id));
+  document.getElementById('cn').focus();
+}
+
+async function saveCl(id){
+  const name=document.getElementById('cn').value.trim(), desc=document.getElementById('cd').value.trim(), type=document.getElementById('ct').value;
+  if(!name){ toast('Name is required','error'); return; }
+  try{
+    id ? await api('PUT',`/api/clusters/${id}`,{name,description:desc,replication_type:type})
+       : await api('POST','/api/clusters',{name,description:desc,replication_type:type});
+    toast(id?'Cluster updated':'Cluster created','success'); closeModal(); renderClusters();
+  }catch(e){ toast(e.message,'error'); }
+}
+
+async function delCl(id,cls){
+  const c=cls.find(x=>x.id===id);
+  if(!confirm(`Delete cluster "${c?.name}"?`)) return;
+  try{ await api('DELETE',`/api/clusters/${id}`); toast('Cluster deleted','success'); renderClusters(); }catch(e){ toast(e.message,'error'); }
+}
+
+function openAddMember(cid,srvs){
+  const opts=srvs.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.host)})</option>`).join('');
+  openModal(`<div class="modal">
+    <div class="modal-h"><div class="modal-title">Add server to cluster</div>${X_BTN}</div>
+    <div class="modal-b">
+      <div class="fg"><label>Server *</label><select id="ams"><option value="">Select server...</option>${opts}</select></div>
+      <div class="fg"><label>Role *</label><select id="amr">
+        <option value="primary">primary — writes, other nodes replicate from this</option>
+        <option value="replica">replica — replicates from primary</option>
+      </select></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" id="amsave">Add</button></div>
+  </div>`);
+  document.getElementById('amsave').addEventListener('click',async()=>{
+    const sid=+document.getElementById('ams').value, role=document.getElementById('amr').value;
+    if(!sid){ toast('Please select a server','error'); return; }
+    try{ await api('POST',`/api/clusters/${cid}/members`,{server_id:sid,role}); toast('Server added to cluster','success'); closeModal(); renderClusters(); }catch(e){ toast(e.message,'error'); }
+  });
+}
+
+async function removeMember(cid,sid){
+  if(!confirm('Remove this server from the cluster?')) return;
+  try{ await api('DELETE',`/api/clusters/${cid}/members/${sid}`); toast('Server removed','success'); renderClusters(); }catch(e){ toast(e.message,'error'); }
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function login(){
+  const pass=document.getElementById('lp').value;
+  const btn=document.getElementById('lb'); btn.disabled=true; btn.textContent='Signing in...';
+  document.getElementById('le').classList.add('hidden');
+  try{
+    const {token}=await api('POST','/api/auth',{password:pass});
+    S.token=token; localStorage.setItem('dc_token',token); showApp();
+  }catch{ document.getElementById('le').classList.remove('hidden'); btn.disabled=false; btn.textContent='Sign in'; }
+}
+
+function logout(){ S.token=''; localStorage.removeItem('dc_token'); clearTimers(); showLogin(); }
+function showLogin(){ document.getElementById('app').classList.add('hidden'); document.getElementById('login-screen').classList.remove('hidden'); document.getElementById('lp').value=''; }
+function showApp(){ document.getElementById('login-screen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); navigate('dashboard'); }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init(){
+  document.querySelectorAll('[data-s]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.s)));
+  document.getElementById('logout-btn').addEventListener('click',logout);
+  document.getElementById('lb').addEventListener('click',login);
+  document.getElementById('lp').addEventListener('keydown',e=>{ if(e.key==='Enter') login(); });
+  if(S.token){ try{ await api('GET','/api/status'); showApp(); }catch{ showLogin(); } }
+  else showLogin();
+}
+init();
+</script>
+</body>
+</html>

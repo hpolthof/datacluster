@@ -1,0 +1,13 @@
+services:
+  datacluster:
+    build: .
+    container_name: datacluster
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      - DATA_DIR=/data
+      - APP_PASSWORD=changeme      # ← change this before deploying
+      - TZ=Europe/Amsterdam

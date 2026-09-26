@@ -1,0 +1,402 @@
+package migration
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"datacluster/internal/pg"
+)
+
+type Logger interface {
+	Log(msg string)
+}
+
+type funcLogger struct {
+	fn func(string)
+}
+
+func (f *funcLogger) Log(msg string) { f.fn(msg) }
+
+func FuncLogger(fn func(string)) Logger {
+	return &funcLogger{fn: fn}
+}
+
+// Run performs a full database migration from source to target using binary COPY protocol.
+func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migrateUsers bool, log Logger) error {
+	log.Log(fmt.Sprintf("[%s] Starting migration: %s/%s → %s/%s", ts(), src.Host, srcDB, dst.Host, dstDB))
+
+	srcConn, err := pg.Connect(ctx, src, srcDB)
+	if err != nil {
+		return fmt.Errorf("connect source: %w", err)
+	}
+	defer srcConn.Close(ctx)
+
+	dstConn, err := pg.Connect(ctx, dst, dstDB)
+	if err != nil {
+		return fmt.Errorf("connect target: %w", err)
+	}
+	defer dstConn.Close(ctx)
+
+	log.Log(fmt.Sprintf("[%s] Connected to source and target", ts()))
+
+	// 1. Copy schema
+	log.Log(fmt.Sprintf("[%s] Copying schema...", ts()))
+	if err := copySchema(ctx, srcConn, dstConn, log); err != nil {
+		return fmt.Errorf("copy schema: %w", err)
+	}
+
+	// 2. Disable FK checks on target temporarily
+	_, _ = dstConn.Exec(ctx, `SET session_replication_role = 'replica'`)
+
+	// 3. Copy each table
+	tables, err := listTables(ctx, srcConn)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+	log.Log(fmt.Sprintf("[%s] Found %d tables to migrate", ts(), len(tables)))
+
+	total := int64(0)
+	for _, table := range tables {
+		n, err := copyTable(ctx, srcConn, dstConn, table)
+		if err != nil {
+			log.Log(fmt.Sprintf("[%s] ERROR copying table %s: %v", ts(), table, err))
+			return fmt.Errorf("copy table %s: %w", table, err)
+		}
+		log.Log(fmt.Sprintf("[%s] Table %-40s %d rows", ts(), table, n))
+		total += n
+	}
+
+	// 4. Re-enable FK
+	_, _ = dstConn.Exec(ctx, `SET session_replication_role = 'origin'`)
+
+	// 5. Sync sequences
+	log.Log(fmt.Sprintf("[%s] Syncing sequences...", ts()))
+	if err := syncSequences(ctx, srcConn, dstConn); err != nil {
+		log.Log(fmt.Sprintf("[%s] WARNING: sequence sync failed: %v", ts(), err))
+	}
+
+	// 6. Optional: migrate users from managed DB records
+	if migrateUsers {
+		log.Log(fmt.Sprintf("[%s] Skipping user migration (handled separately via managed databases)", ts()))
+	}
+
+	log.Log(fmt.Sprintf("[%s] Migration complete — %d total rows", ts(), total))
+	return nil
+}
+
+func listTables(ctx context.Context, conn *pgx.Conn) ([]string, error) {
+	rows, err := conn.Query(ctx, `
+		SELECT tablename FROM pg_tables
+		WHERE schemaname='public'
+		ORDER BY tablename`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		tables = append(tables, t)
+	}
+	return tables, rows.Err()
+}
+
+// copyTable streams a table from src to dst using binary COPY protocol.
+// This is the most efficient method — no intermediate serialization.
+func copyTable(ctx context.Context, src, dst *pgx.Conn, table string) (int64, error) {
+	pr, pw := io.Pipe()
+
+	copySQL := fmt.Sprintf(`COPY public.%s TO STDOUT (FORMAT BINARY)`, pgx.Identifier{table}.Sanitize())
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := src.PgConn().CopyTo(ctx, pw, copySQL)
+		pw.CloseWithError(err)
+		errCh <- err
+	}()
+
+	result, err := dst.PgConn().CopyFrom(ctx, pr,
+		fmt.Sprintf(`COPY public.%s FROM STDIN (FORMAT BINARY)`, pgx.Identifier{table}.Sanitize()))
+	pr.Close()
+
+	srcErr := <-errCh
+	if srcErr != nil {
+		return 0, srcErr
+	}
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+// copySchema recreates the public schema DDL on the target.
+func copySchema(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
+	// Create sequences
+	if err := copySequences(ctx, src, dst); err != nil {
+		return fmt.Errorf("sequences: %w", err)
+	}
+	// Create tables (without FK constraints)
+	if err := copyTables(ctx, src, dst); err != nil {
+		return fmt.Errorf("tables: %w", err)
+	}
+	// Create indexes
+	if err := copyIndexes(ctx, src, dst, log); err != nil {
+		return fmt.Errorf("indexes: %w", err)
+	}
+	// Apply FK constraints
+	if err := copyForeignKeys(ctx, src, dst, log); err != nil {
+		return fmt.Errorf("foreign keys: %w", err)
+	}
+	return nil
+}
+
+func copySequences(ctx context.Context, src, dst *pgx.Conn) error {
+	rows, err := src.Query(ctx, `
+		SELECT sequence_name, data_type, start_value, minimum_value, maximum_value, increment, cycle_option
+		FROM information_schema.sequences WHERE sequence_schema='public'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, dataType, cycle string
+		var start, min, max, inc int64
+		if err := rows.Scan(&name, &dataType, &start, &min, &max, &inc, &cycle); err != nil {
+			return err
+		}
+		cycleStr := "NO CYCLE"
+		if cycle == "YES" {
+			cycleStr = "CYCLE"
+		}
+		ddl := fmt.Sprintf(
+			`CREATE SEQUENCE IF NOT EXISTS public.%s AS %s START %d MINVALUE %d MAXVALUE %d INCREMENT %d %s`,
+			name, dataType, start, min, max, inc, cycleStr)
+		if _, err := dst.Exec(ctx, ddl); err != nil {
+			return fmt.Errorf("create sequence %s: %w", name, err)
+		}
+	}
+	return rows.Err()
+}
+
+func copyTables(ctx context.Context, src, dst *pgx.Conn) error {
+	tables, err := listTables(ctx, src)
+	if err != nil {
+		return err
+	}
+	for _, table := range tables {
+		ddl, err := buildCreateTable(ctx, src, table)
+		if err != nil {
+			return fmt.Errorf("build DDL for %s: %w", table, err)
+		}
+		if _, err := dst.Exec(ctx, ddl); err != nil {
+			return fmt.Errorf("create table %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func buildCreateTable(ctx context.Context, conn *pgx.Conn, table string) (string, error) {
+	rows, err := conn.Query(ctx, `
+		SELECT column_name, data_type, character_maximum_length, is_nullable,
+		       column_default, numeric_precision, numeric_scale
+		FROM information_schema.columns
+		WHERE table_schema='public' AND table_name=$1
+		ORDER BY ordinal_position`, table)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var cols []string
+	for rows.Next() {
+		var colName, dataType, isNullable string
+		var charLen, numPrec, numScale *int
+		var colDefault *string
+		if err := rows.Scan(&colName, &dataType, &charLen, &isNullable, &colDefault, &numPrec, &numScale); err != nil {
+			return "", err
+		}
+
+		typeDef := dataType
+		switch dataType {
+		case "character varying":
+			if charLen != nil {
+				typeDef = fmt.Sprintf("varchar(%d)", *charLen)
+			} else {
+				typeDef = "text"
+			}
+		case "character":
+			if charLen != nil {
+				typeDef = fmt.Sprintf("char(%d)", *charLen)
+			}
+		case "numeric", "decimal":
+			if numPrec != nil && numScale != nil {
+				typeDef = fmt.Sprintf("numeric(%d,%d)", *numPrec, *numScale)
+			}
+		}
+
+		col := fmt.Sprintf("%s %s", quoteIdent(colName), typeDef)
+		if isNullable == "NO" {
+			col += " NOT NULL"
+		}
+		if colDefault != nil {
+			col += " DEFAULT " + *colDefault
+		}
+		cols = append(cols, col)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	// Add primary key
+	pkCols, err := getPrimaryKey(ctx, conn, table)
+	if err == nil && len(pkCols) > 0 {
+		quoted := make([]string, len(pkCols))
+		for i, c := range pkCols {
+			quoted[i] = quoteIdent(c)
+		}
+		cols = append(cols, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(quoted, ", ")))
+	}
+
+	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS public.%s (\n  %s\n)",
+		quoteIdent(table), strings.Join(cols, ",\n  ")), nil
+}
+
+func getPrimaryKey(ctx context.Context, conn *pgx.Conn, table string) ([]string, error) {
+	rows, err := conn.Query(ctx, `
+		SELECT kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu ON tc.constraint_name=kcu.constraint_name
+			AND tc.table_schema=kcu.table_schema
+		WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema='public' AND tc.table_name=$1
+		ORDER BY kcu.ordinal_position`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		cols = append(cols, c)
+	}
+	return cols, rows.Err()
+}
+
+func copyIndexes(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
+	rows, err := src.Query(ctx, `
+		SELECT indexname, indexdef FROM pg_indexes
+		WHERE schemaname='public' AND indexname NOT IN (
+			SELECT constraint_name FROM information_schema.table_constraints
+			WHERE table_schema='public'
+		)
+		ORDER BY indexname`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return err
+		}
+		if _, err := dst.Exec(ctx, def); err != nil {
+			log.Log(fmt.Sprintf("[%s] WARNING: index %s: %v", ts(), name, err))
+		}
+	}
+	return rows.Err()
+}
+
+func copyForeignKeys(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
+	rows, err := src.Query(ctx, `
+		SELECT tc.constraint_name,
+		       kcu.table_name, kcu.column_name,
+		       ccu.table_name AS ref_table, ccu.column_name AS ref_column,
+		       rc.update_rule, rc.delete_rule
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema
+		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name=tc.constraint_name AND ccu.table_schema=tc.table_schema
+		JOIN information_schema.referential_constraints rc ON rc.constraint_name=tc.constraint_name AND rc.constraint_schema=tc.table_schema
+		WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema='public'
+		ORDER BY tc.constraint_name`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type fk struct {
+		name, table, col, refTable, refCol, onUpdate, onDelete string
+	}
+	fks := make(map[string]*fk)
+	var order []string
+	for rows.Next() {
+		var f fk
+		if err := rows.Scan(&f.name, &f.table, &f.col, &f.refTable, &f.refCol, &f.onUpdate, &f.onDelete); err != nil {
+			return err
+		}
+		if _, ok := fks[f.name]; !ok {
+			fks[f.name] = &f
+			order = append(order, f.name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, name := range order {
+		f := fks[name]
+		ddl := fmt.Sprintf(
+			`ALTER TABLE public.%s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES public.%s(%s) ON UPDATE %s ON DELETE %s`,
+			quoteIdent(f.table), quoteIdent(name), quoteIdent(f.col),
+			quoteIdent(f.refTable), quoteIdent(f.refCol), f.onUpdate, f.onDelete)
+		if _, err := dst.Exec(ctx, ddl); err != nil {
+			log.Log(fmt.Sprintf("[%s] WARNING: FK %s: %v", ts(), name, err))
+		}
+	}
+	return nil
+}
+
+func syncSequences(ctx context.Context, src, dst *pgx.Conn) error {
+	rows, err := src.Query(ctx, `SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema='public'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var seqs []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return err
+		}
+		seqs = append(seqs, s)
+	}
+	rows.Close()
+
+	for _, seq := range seqs {
+		var lastVal int64
+		var isCalled bool
+		if err := src.QueryRow(ctx, fmt.Sprintf(`SELECT last_value, is_called FROM public.%s`, seq)).
+			Scan(&lastVal, &isCalled); err != nil {
+			continue
+		}
+		if isCalled {
+			_, _ = dst.Exec(ctx, fmt.Sprintf(`SELECT setval('public.%s', %d, true)`, seq, lastVal))
+		}
+	}
+	return nil
+}
+
+func quoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+func ts() string {
+	return time.Now().Format("15:04:05")
+}
