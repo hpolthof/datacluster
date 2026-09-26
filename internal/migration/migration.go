@@ -36,6 +36,15 @@ func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migra
 	}
 	defer srcConn.Close(ctx)
 
+	// Ensure target database exists; create it if not.
+	created, err := ensureTargetDatabase(ctx, dst, dstDB)
+	if err != nil {
+		return fmt.Errorf("ensure target database: %w", err)
+	}
+	if created {
+		log.Log(fmt.Sprintf("[%s] Target database %q created", ts(), dstDB))
+	}
+
 	dstConn, err := pg.Connect(ctx, dst, dstDB)
 	if err != nil {
 		return fmt.Errorf("connect target: %w", err)
@@ -391,6 +400,29 @@ func syncSequences(ctx context.Context, src, dst *pgx.Conn) error {
 		}
 	}
 	return nil
+}
+
+// ensureTargetDatabase connects to the target's postgres database and creates
+// dstDB if it does not exist. Returns true if the database was created.
+func ensureTargetDatabase(ctx context.Context, dst pg.ConnParams, dstDB string) (bool, error) {
+	conn, err := pg.Connect(ctx, dst, "postgres")
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close(ctx)
+
+	var exists bool
+	err = conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, dstDB).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+	if _, err := conn.Exec(ctx, fmt.Sprintf(`CREATE DATABASE %s`, quoteIdent(dstDB))); err != nil {
+		return false, fmt.Errorf("create database %q: %w", dstDB, err)
+	}
+	return true, nil
 }
 
 func quoteIdent(s string) string {

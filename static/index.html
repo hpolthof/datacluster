@@ -649,7 +649,7 @@ function openMigModal(srvs){
       </div>
       <div class="fg"><div class="cb-group"><input type="checkbox" id="mu" checked><label for="mu">Migrate user permissions</label></div></div>
       <div class="fg"><div class="cb-group"><input type="checkbox" id="mclean"><label for="mclean">Delete source database &amp; user after successful migration</label></div></div>
-      <div class="warn-box">⚠️ The target database must already exist. Existing tables will be overwritten.</div>
+      <div class="warn-box">⚠️ The target database will be created automatically if it does not exist. Existing tables will be overwritten.</div>
     </div>
     <div class="modal-f"><button class="btn btn-s" onclick="closeModal()">Cancel</button><button class="btn btn-p" id="msave">Start</button></div>
   </div>`);
