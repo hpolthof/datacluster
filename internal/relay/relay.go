@@ -39,7 +39,10 @@ func dial(ctx context.Context, relayBaseURL, token, target string) (net.Conn, er
 
 	var rawConn net.Conn
 	if u.Scheme == "https" {
-		d := &tls.Dialer{Config: &tls.Config{ServerName: u.Hostname()}}
+		d := &tls.Dialer{Config: &tls.Config{
+			ServerName: u.Hostname(),
+			NextProtos: []string{"http/1.1"}, // force HTTP/1.1 — HTTP/2 breaks the Upgrade mechanism
+		}}
 		rawConn, err = d.DialContext(ctx, "tcp", host)
 	} else {
 		d := &net.Dialer{}
