@@ -192,6 +192,19 @@ func (d *DB) DeleteManagedDatabase(id int) error {
 	return err
 }
 
+func (d *DB) GetManagedDatabaseByServerAndName(serverID int, dbName string) (*ManagedDatabase, string, error) {
+	var m ManagedDatabase
+	var enc string
+	err := d.QueryRow(`SELECT md.id,md.server_id,s.name,md.database_name,md.owner_user,md.owner_password_enc,md.created_at,md.notes
+		FROM managed_databases md JOIN servers s ON s.id=md.server_id
+		WHERE md.server_id=? AND md.database_name=?`, serverID, dbName).
+		Scan(&m.ID, &m.ServerID, &m.ServerName, &m.DatabaseName, &m.OwnerUser, &enc, &m.CreatedAt, &m.Notes)
+	if err == sql.ErrNoRows {
+		return nil, "", nil
+	}
+	return &m, enc, err
+}
+
 // ─── Clusters ────────────────────────────────────────────────────────────────
 
 func (d *DB) ListClusters() ([]Cluster, error) {

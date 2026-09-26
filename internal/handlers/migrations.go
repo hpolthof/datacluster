@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"datacluster/internal/crypto"
 	"datacluster/internal/migration"
 	"datacluster/internal/pg"
 )
@@ -97,11 +98,22 @@ func (h *Handlers) runMigration(migID, srcServerID, dstServerID int, srcDB, dstD
 		return
 	}
 
+	// Look up the owner password from managed database records (if known)
+	ownerPassword := ""
+	if migrateUsers {
+		mdb, mdbEnc, err := h.db.GetManagedDatabaseByServerAndName(srcServerID, srcDB)
+		if err == nil && mdb != nil && mdbEnc != "" {
+			if pw, err := crypto.Decrypt(mdbEnc); err == nil {
+				ownerPassword = pw
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
 
 	logger := migration.FuncLogger(logFn)
-	runErr := migration.Run(ctx, *srcParams, *dstParams, srcDB, dstDB, migrateUsers, logger)
+	runErr := migration.Run(ctx, *srcParams, *dstParams, srcDB, dstDB, migrateUsers, ownerPassword, logger)
 
 	completed := time.Now()
 	if runErr != nil {

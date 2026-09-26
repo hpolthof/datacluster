@@ -2,6 +2,8 @@ package migration
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"strings"
@@ -27,7 +29,8 @@ func FuncLogger(fn func(string)) Logger {
 }
 
 // Run performs a full database migration from source to target using binary COPY protocol.
-func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migrateUsers bool, log Logger) error {
+// ownerPassword is the known password for the source database owner; pass empty string if unknown.
+func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migrateUsers bool, ownerPassword string, log Logger) error {
 	log.Log(fmt.Sprintf("[%s] Starting migration: %s/%s → %s/%s", ts(), src.Host, srcDB, dst.Host, dstDB))
 
 	srcConn, err := pg.Connect(ctx, src, srcDB)
@@ -89,9 +92,11 @@ func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migra
 		log.Log(fmt.Sprintf("[%s] WARNING: sequence sync failed: %v", ts(), err))
 	}
 
-	// 6. Optional: migrate users from managed DB records
+	// 6. Migrate database owner role
 	if migrateUsers {
-		log.Log(fmt.Sprintf("[%s] Skipping user migration (handled separately via managed databases)", ts()))
+		if err := migrateDBOwner(ctx, src, dst, srcDB, dstDB, ownerPassword, log); err != nil {
+			log.Log(fmt.Sprintf("[%s] [WARN] User migration failed: %v", ts(), err))
+		}
 	}
 
 	log.Log(fmt.Sprintf("[%s] Migration complete — %d total rows", ts(), total))
@@ -446,6 +451,94 @@ func syncSequences(ctx context.Context, src, dst *pgx.Conn) error {
 		}
 	}
 	return nil
+}
+
+// migrateDBOwner copies the owner role of srcDB to the target server.
+// If knownPassword is empty a random one is generated and logged.
+func migrateDBOwner(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB, knownPassword string, log Logger) error {
+	// Get the owner role name from the source
+	srcConn, err := pg.Connect(ctx, src, "postgres")
+	if err != nil {
+		return err
+	}
+	defer srcConn.Close(ctx)
+
+	var ownerName string
+	if err := srcConn.QueryRow(ctx,
+		`SELECT pg_catalog.pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1`, srcDB,
+	).Scan(&ownerName); err != nil || ownerName == "" || ownerName == "postgres" {
+		log.Log(fmt.Sprintf("[%s] No dedicated owner role on source — skipping user migration", ts()))
+		return nil
+	}
+
+	password := knownPassword
+	generated := password == ""
+	if generated {
+		password = generatePassword(24)
+	}
+
+	// Create or update the role on the target
+	dstConn, err := pg.Connect(ctx, dst, "postgres")
+	if err != nil {
+		return err
+	}
+	defer dstConn.Close(ctx)
+
+	var exists bool
+	_ = dstConn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)`, ownerName).Scan(&exists)
+
+	escapedPw := strings.ReplaceAll(password, "'", "''")
+	if exists {
+		if generated {
+			if _, err := dstConn.Exec(ctx, fmt.Sprintf(`ALTER ROLE %s WITH LOGIN PASSWORD '%s'`, quoteIdent(ownerName), escapedPw)); err != nil {
+				return fmt.Errorf("alter role: %w", err)
+			}
+		}
+		log.Log(fmt.Sprintf("[%s] Role %q already exists on target", ts(), ownerName))
+	} else {
+		if _, err := dstConn.Exec(ctx, fmt.Sprintf(`CREATE ROLE %s WITH LOGIN PASSWORD '%s'`, quoteIdent(ownerName), escapedPw)); err != nil {
+			return fmt.Errorf("create role: %w", err)
+		}
+		log.Log(fmt.Sprintf("[%s] Role %q created on target", ts(), ownerName))
+	}
+
+	// Grant role access to the target database and schema
+	if _, err := dstConn.Exec(ctx, fmt.Sprintf(`GRANT ALL PRIVILEGES ON DATABASE %s TO %s`, quoteIdent(dstDB), quoteIdent(ownerName))); err != nil {
+		log.Log(fmt.Sprintf("[%s] [WARN] grant database: %v", ts(), err))
+	}
+
+	dstDbConn, err := pg.Connect(ctx, dst, dstDB)
+	if err != nil {
+		return err
+	}
+	defer dstDbConn.Close(ctx)
+
+	for _, q := range []string{
+		fmt.Sprintf(`GRANT ALL ON SCHEMA public TO %s`, quoteIdent(ownerName)),
+		fmt.Sprintf(`GRANT ALL ON ALL TABLES IN SCHEMA public TO %s`, quoteIdent(ownerName)),
+		fmt.Sprintf(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO %s`, quoteIdent(ownerName)),
+	} {
+		if _, err := dstDbConn.Exec(ctx, q); err != nil {
+			log.Log(fmt.Sprintf("[%s] [WARN] grant: %v", ts(), err))
+		}
+	}
+
+	if generated {
+		log.Log(fmt.Sprintf("[%s] ╔══════════════════════════════════════════════════════╗", ts()))
+		log.Log(fmt.Sprintf("[%s] ║  GENERATED PASSWORD for role %q", ts(), ownerName))
+		log.Log(fmt.Sprintf("[%s] ║  Password: %s", ts(), password))
+		log.Log(fmt.Sprintf("[%s] ║  Save this — it will not be shown again.", ts()))
+		log.Log(fmt.Sprintf("[%s] ╚══════════════════════════════════════════════════════╝", ts()))
+	} else {
+		log.Log(fmt.Sprintf("[%s] Role %q migrated with original password", ts(), ownerName))
+	}
+	return nil
+}
+
+func generatePassword(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)[:n]
 }
 
 // ensureTargetDatabase connects to the target's postgres database and creates
