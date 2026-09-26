@@ -46,6 +46,11 @@ func main() {
 
 		r.Get("/api/status", h.GetStatus)
 
+		r.Get("/api/relays", h.ListRelays)
+		r.Post("/api/relays", h.CreateRelay)
+		r.Put("/api/relays/{id}", h.UpdateRelay)
+		r.Delete("/api/relays/{id}", h.DeleteRelay)
+
 		r.Get("/api/servers", h.ListServers)
 		r.Post("/api/servers", h.CreateServer)
 		r.Get("/api/servers/{id}", h.GetServer)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -49,8 +50,7 @@ func (h *Handlers) CreateServer(w http.ResponseWriter, r *http.Request) {
 		AdminPassword string `json:"admin_password"`
 		SSLMode       string `json:"ssl_mode"`
 		Notes         string `json:"notes"`
-		RelayURL      string `json:"relay_url"`
-		RelayPassword string `json:"relay_password"`
+		RelayID       *int   `json:"relay_id"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
@@ -72,16 +72,8 @@ func (h *Handlers) CreateServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "encryption failed")
 		return
 	}
-	relayEnc := ""
-	if body.RelayPassword != "" {
-		relayEnc, err = crypto.Encrypt(body.RelayPassword)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "encryption failed")
-			return
-		}
-	}
 
-	id, err := h.db.CreateServer(body.Name, body.Host, body.Port, body.AdminUser, enc, body.SSLMode, body.Notes, body.RelayURL, relayEnc)
+	id, err := h.db.CreateServer(body.Name, body.Host, body.Port, body.AdminUser, enc, body.SSLMode, body.Notes, body.RelayID)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -98,7 +90,7 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, existingAdminEnc, existingRelayEnc, err := h.db.GetServerWithPassword(id)
+	existing, existingAdminEnc, _, err := h.db.GetServerWithPassword(id)
 	if err != nil || existing == nil {
 		writeError(w, http.StatusNotFound, "server not found")
 		return
@@ -112,8 +104,7 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		AdminPassword string `json:"admin_password"`
 		SSLMode       string `json:"ssl_mode"`
 		Notes         string `json:"notes"`
-		RelayURL      string `json:"relay_url"`
-		RelayPassword string `json:"relay_password"`
+		RelayID       *int   `json:"relay_id"` // null clears relay
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
@@ -134,9 +125,6 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	if body.SSLMode == "" {
 		body.SSLMode = existing.SSLMode
 	}
-	if body.RelayURL == "" {
-		body.RelayURL = existing.RelayURL
-	}
 
 	adminEnc := existingAdminEnc
 	if body.AdminPassword != "" {
@@ -146,16 +134,8 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	relayEnc := existingRelayEnc
-	if body.RelayPassword != "" {
-		relayEnc, err = crypto.Encrypt(body.RelayPassword)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "encryption failed")
-			return
-		}
-	}
 
-	if err := h.db.UpdateServer(id, body.Name, body.Host, body.Port, body.AdminUser, adminEnc, body.SSLMode, body.Notes, body.RelayURL, relayEnc); err != nil {
+	if err := h.db.UpdateServer(id, body.Name, body.Host, body.Port, body.AdminUser, adminEnc, body.SSLMode, body.Notes, body.RelayID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -269,13 +249,27 @@ func (h *Handlers) serverConnParams(serverID int) (*pg.ConnParams, error) {
 		User:     s.AdminUser,
 		Password: pass,
 		SSLMode:  s.SSLMode,
-		RelayURL: s.RelayURL,
 	}
-	if s.RelayURL != "" && relayEnc != "" {
+
+	if s.RelayID != nil {
+		// Named relay takes priority
+		relay, relayPwEnc, err := h.db.GetRelay(*s.RelayID)
+		if err != nil || relay == nil {
+			return nil, fmt.Errorf("relay not found")
+		}
+		relayPass, err := crypto.Decrypt(relayPwEnc)
+		if err != nil {
+			return nil, err
+		}
+		params.RelayURL = relay.URL
+		params.RelayToken = config.TokenFromPassword(relayPass)
+	} else if s.RelayURL != "" && relayEnc != "" {
+		// Legacy inline relay config
 		relayPass, err := crypto.Decrypt(relayEnc)
 		if err != nil {
 			return nil, err
 		}
+		params.RelayURL = s.RelayURL
 		params.RelayToken = config.TokenFromPassword(relayPass)
 	}
 	return params, nil

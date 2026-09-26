@@ -11,9 +11,18 @@ type Server struct {
 	SSLMode     string     `json:"ssl_mode"`
 	Notes       string     `json:"notes"`
 	RelayURL    string     `json:"relay_url"`
+	RelayID     *int       `json:"relay_id,omitempty"`
+	RelayName   string     `json:"relay_name,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastChecked *time.Time `json:"last_checked"`
 	Status      string     `json:"status"`
+}
+
+type Relay struct {
+	ID        int       `json:"id"`
+	Name      string    `json:"name"`
+	URL       string    `json:"url"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type ManagedDatabase struct {

@@ -197,6 +197,10 @@ select option{background:var(--surface2)}
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.7 10.7l6.6-4.4M8.7 13.3l6.6 4.4"/></svg>
         Clusters
       </div>
+      <div class="nav-item" data-s="relays">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 12h-4V8"/><circle cx="17" cy="12" r="1" fill="currentColor"/><path d="M3 12a9 9 0 1018 0 9 9 0 00-18 0"/></svg>
+        Relays
+      </div>
     </nav>
     <div class="sidebar-footer">
       <div class="nav-item" id="logout-btn">
@@ -270,14 +274,14 @@ function countUp(el,n,ms=600){
 function clearTimers(){ S.timers.forEach(clearInterval); S.timers=[]; }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
-const TITLES={dashboard:'Dashboard',servers:'Servers',databases:'Databases',migrations:'Migrations',clusters:'Clusters'};
+const TITLES={dashboard:'Dashboard',servers:'Servers',databases:'Databases',migrations:'Migrations',clusters:'Clusters',relays:'Relays'};
 function navigate(sec){
   clearTimers();
   document.querySelectorAll('[data-s]').forEach(el=>el.classList.toggle('active',el.dataset.s===sec));
   document.getElementById('pt').textContent = TITLES[sec]||sec;
   const c = document.getElementById('mc');
   c.innerHTML = `<div style="color:var(--muted);padding:40px">Loading...</div>`;
-  (sec==='dashboard'?renderDashboard():sec==='servers'?renderServers():sec==='databases'?renderDatabases():sec==='migrations'?renderMigrations():renderClusters())
+  (sec==='dashboard'?renderDashboard():sec==='servers'?renderServers():sec==='databases'?renderDatabases():sec==='migrations'?renderMigrations():sec==='relays'?renderRelays():renderClusters())
     .catch(e=>{ toast(e.message,'error'); c.innerHTML=`<div style="color:var(--red);padding:40px">${esc(e.message)}</div>`; });
 }
 
@@ -344,7 +348,7 @@ async function renderServers(){
 
 function srvRow(s){
   return `<tr id="sr-${s.id}">
-    <td><a href="#" class="srv-link" data-sid="${s.id}" data-sname="${esc(s.name)}" style="color:var(--text);text-decoration:none;font-weight:600">${esc(s.name)}</a>${s.relay_url?` <span style="font-size:11px;background:#1e293b;color:#94a3b8;border-radius:4px;padding:1px 5px">relay</span>`:''}</td>
+    <td><a href="#" class="srv-link" data-sid="${s.id}" data-sname="${esc(s.name)}" style="color:var(--text);text-decoration:none;font-weight:600">${esc(s.name)}</a>${(s.relay_name||s.relay_url)?` <span style="font-size:11px;background:#1e293b;color:#94a3b8;border-radius:4px;padding:1px 5px">${esc(s.relay_name||'relay')}</span>`:''}</td>
     <td class="mono">${esc(s.host)}:${s.port}</td>
     <td>${esc(s.admin_user)}</td><td class="text-muted">${s.ssl_mode}</td>
     <td id="ss-${s.id}">${badge(s.status)}</td><td class="text-muted">${fd(s.last_checked)}</td>
@@ -365,8 +369,11 @@ async function testSrv(id){
 }
 async function refreshStatuses(){ for(const s of S.servers) try{ await api('POST',`/api/servers/${s.id}/test`); const el=document.getElementById(`ss-${s.id}`); if(el) el.innerHTML=badge('online'); }catch{ const el=document.getElementById(`ss-${s.id}`); if(el) el.innerHTML=badge('offline'); } }
 
-function openSrvModal(srv=null){
+async function openSrvModal(srv=null){
   const e=srv||{};
+  const relays = await api('GET','/api/relays').catch(()=>[]);
+  const relayOpts = `<option value="">— no relay —</option>`
+    + relays.map(r=>`<option value="${r.id}"${e.relay_id===r.id?' selected':''}>${esc(r.name)} <span style="color:var(--muted)">${esc(r.url)}</span></option>`).join('');
   openModal(`<div class="modal">
     <div class="modal-h"><div class="modal-title">${srv?'Edit server':'Add server'}</div>${X_BTN}</div>
     <div class="modal-b">
@@ -385,11 +392,10 @@ function openSrvModal(srv=null){
         <option value="disable"${e.ssl_mode==='disable'?' selected':''}>disable</option>
       </select></div>
       <div class="fg"><label>Notes</label><textarea id="snotes" rows="2">${esc(e.notes||'')}</textarea></div>
-      <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px">Relay (jump server)</summary>
-      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
-        <div class="fg"><label>Relay URL <span style="color:var(--muted);font-weight:400">(DataCluster instance that can reach this server)</span></label><input id="srelay" placeholder="https://datacluster-lw02.example.com" value="${esc(e.relay_url||'')}"></div>
-        <div class="fg"><label>Relay APP_PASSWORD ${srv?'(blank = keep current)':''}</label><input type="password" id="srelaypw" placeholder="${srv&&e.relay_url?'••••':'leave empty if no relay'}"></div>
-      </div></details>
+      <div class="fg"><label>Relay <span style="font-weight:400;color:var(--muted)">(optional jump server)</span>
+        ${relays.length===0?`<a href="#" id="go-relays" style="font-size:11.5px;color:var(--accent);margin-left:6px">+ configure relays first</a>`:''}
+      </label>
+      <select id="srelay">${relayOpts}</select></div>
     </div>
     <div class="modal-f">
       <button class="btn btn-s" onclick="closeModal()">Cancel</button>
@@ -397,6 +403,7 @@ function openSrvModal(srv=null){
     </div>
   </div>`);
   document.getElementById('ssave').addEventListener('click',()=>saveSrv(srv?.id));
+  document.getElementById('go-relays')?.addEventListener('click',e=>{ e.preventDefault(); closeModal(); navigate('relays'); });
   document.getElementById('sn').focus();
 }
 
@@ -405,12 +412,10 @@ async function saveSrv(id){
     port=+document.getElementById('sp').value||5432, user=document.getElementById('su').value.trim(),
     pass=document.getElementById('sw').value, ssl=document.getElementById('ssl').value,
     notes=document.getElementById('snotes').value.trim(),
-    relayURL=document.getElementById('srelay').value.trim(),
-    relayPw=document.getElementById('srelaypw').value;
+    relayVal=document.getElementById('srelay').value;
   if(!name||!host||!user||(!id&&!pass)){ toast('Please fill in all required fields','error'); return; }
-  const body={name,host,port,admin_user:user,ssl_mode:ssl,notes,relay_url:relayURL};
+  const body={name,host,port,admin_user:user,ssl_mode:ssl,notes,relay_id:relayVal?+relayVal:null};
   if(pass) body.admin_password=pass;
-  if(relayPw) body.relay_password=relayPw;
   try {
     id ? await api('PUT',`/api/servers/${id}`,body) : await api('POST','/api/servers',body);
     toast(id?'Server updated':'Server added','success');
@@ -825,6 +830,88 @@ function openAddMember(cid,srvs){
 async function removeMember(cid,sid){
   if(!confirm('Remove this server from the cluster?')) return;
   try{ await api('DELETE',`/api/clusters/${cid}/members/${sid}`); toast('Server removed','success'); renderClusters(); }catch(e){ toast(e.message,'error'); }
+}
+
+// ── Relays ────────────────────────────────────────────────────────────────────
+async function renderRelays(){
+  const relays = await api('GET','/api/relays');
+  const mc = document.getElementById('mc');
+  mc.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">Relays (${relays.length})</div>
+      <button class="btn btn-p" id="add-relay">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        Add relay
+      </button>
+    </div>
+    <div class="info-box">A relay is a DataCluster instance that acts as a jump server. Configure it once here, then select it in server settings.</div>
+    ${relays.length===0?empty('🔀','No relays','Add a relay to connect servers across networks'):`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>URL</th><th>Servers using it</th><th>Added</th><th>Actions</th></tr></thead>
+      <tbody>${relays.map(r=>`<tr>
+        <td><strong>${esc(r.name)}</strong></td>
+        <td class="mono" style="font-size:12.5px">${esc(r.url)}</td>
+        <td class="text-muted" id="rsc-${r.id}">—</td>
+        <td class="text-muted">${fd(r.created_at)}</td>
+        <td><div class="ac">
+          <button class="btn btn-g btn-sm" data-redit="${r.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="btn btn-g btn-sm" data-rdel="${r.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+        </div></td>
+      </tr>`).join('')}
+      </tbody>
+    </table></div>`}`;
+  mc.querySelector('#add-relay')?.addEventListener('click',()=>openRelayModal());
+  mc.querySelectorAll('[data-redit]').forEach(b=>b.addEventListener('click',()=>editRelay(+b.dataset.redit,relays)));
+  mc.querySelectorAll('[data-rdel]').forEach(b=>b.addEventListener('click',()=>delRelay(+b.dataset.rdel,relays)));
+  // Fill server counts from the server list
+  api('GET','/api/servers').then(srvs=>{
+    relays.forEach(r=>{
+      const count=srvs.filter(s=>s.relay_id===r.id).length;
+      const el=document.getElementById(`rsc-${r.id}`);
+      if(el) el.textContent=count?`${count} server${count>1?'s':''}` :'—';
+    });
+  }).catch(()=>{});
+}
+
+function openRelayModal(relay=null){
+  const e=relay||{};
+  openModal(`<div class="modal">
+    <div class="modal-h"><div class="modal-title">${relay?'Edit relay':'Add relay'}</div>${X_BTN}</div>
+    <div class="modal-b">
+      <div class="info-box">A relay is another DataCluster instance. Its APP_PASSWORD is used to authenticate the tunnel connection.</div>
+      <div class="fg"><label>Name *</label><input id="rn" placeholder="e.g. lw02-relay" value="${esc(e.name||'')}"></div>
+      <div class="fg"><label>URL *</label><input id="ru" placeholder="https://datacluster-lw02.example.com" value="${esc(e.url||'')}"></div>
+      <div class="fg"><label>APP_PASSWORD${relay?' (blank = keep current)':' *'}</label><input type="password" id="rpw" placeholder="${relay?'••••':'APP_PASSWORD of the remote DataCluster'}"></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-s" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-p" id="rsave">${relay?'Save':'Add'}</button>
+    </div>
+  </div>`);
+  document.getElementById('rsave').addEventListener('click',()=>saveRelay(relay?.id));
+  document.getElementById('rn').focus();
+}
+
+async function saveRelay(id){
+  const name=document.getElementById('rn').value.trim(),
+    url=document.getElementById('ru').value.trim(),
+    pw=document.getElementById('rpw').value;
+  if(!name||!url||(!id&&!pw)){ toast('Please fill in all required fields','error'); return; }
+  const body={name,url};
+  if(pw) body.password=pw;
+  try{
+    id ? await api('PUT',`/api/relays/${id}`,body) : await api('POST','/api/relays',body);
+    toast(id?'Relay updated':'Relay added','success');
+    closeModal(); renderRelays();
+  }catch(e){ toast(e.message,'error'); }
+}
+
+function editRelay(id, relays){ openRelayModal(relays.find(r=>r.id===id)); }
+
+async function delRelay(id, relays){
+  const r=relays.find(x=>x.id===id);
+  if(!confirm(`Delete relay "${r?.name}"?\n\nServers using this relay will lose their relay connection.`)) return;
+  try{ await api('DELETE',`/api/relays/${id}`); toast('Relay deleted','success'); renderRelays(); }catch(e){ toast(e.message,'error'); }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

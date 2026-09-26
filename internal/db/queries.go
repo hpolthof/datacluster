@@ -5,18 +5,78 @@ import (
 	"time"
 )
 
+// ─── Relays ───────────────────────────────────────────────────────────────────
+
+func (d *DB) ListRelays() ([]Relay, error) {
+	rows, err := d.Query(`SELECT id,name,url,created_at FROM relays ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Relay
+	for rows.Next() {
+		var r Relay
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, r)
+	}
+	if list == nil {
+		list = []Relay{}
+	}
+	return list, rows.Err()
+}
+
+func (d *DB) GetRelay(id int) (*Relay, string, error) {
+	var r Relay
+	var enc string
+	err := d.QueryRow(`SELECT id,name,url,password_enc,created_at FROM relays WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.URL, &enc, &r.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, "", nil
+	}
+	return &r, enc, err
+}
+
+func (d *DB) CreateRelay(name, url, passwordEnc string) (int64, error) {
+	res, err := d.Exec(`INSERT INTO relays(name,url,password_enc) VALUES(?,?,?)`, name, url, passwordEnc)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *DB) UpdateRelay(id int, name, url, passwordEnc string) error {
+	_, err := d.Exec(`UPDATE relays SET name=?,url=?,password_enc=? WHERE id=?`, name, url, passwordEnc, id)
+	return err
+}
+
+func (d *DB) DeleteRelay(id int) error {
+	_, err := d.Exec(`DELETE FROM relays WHERE id=?`, id)
+	return err
+}
+
 // ─── Servers ─────────────────────────────────────────────────────────────────
 
+const serverCols = `s.id,s.name,s.host,s.port,s.admin_user,s.ssl_mode,s.notes,s.relay_url,s.relay_id,COALESCE(r.name,''),s.created_at,s.last_checked,s.status`
+const serverJoin = `FROM servers s LEFT JOIN relays r ON r.id=s.relay_id`
+
+func scanServer(row interface{ Scan(...any) error }) (Server, error) {
+	var s Server
+	err := row.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.RelayURL, &s.RelayID, &s.RelayName, &s.CreatedAt, &s.LastChecked, &s.Status)
+	return s, err
+}
+
 func (d *DB) ListServers() ([]Server, error) {
-	rows, err := d.Query(`SELECT id,name,host,port,admin_user,ssl_mode,notes,relay_url,created_at,last_checked,status FROM servers ORDER BY name`)
+	rows, err := d.Query(`SELECT ` + serverCols + ` ` + serverJoin + ` ORDER BY s.name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var servers []Server
 	for rows.Next() {
-		var s Server
-		if err := rows.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.RelayURL, &s.CreatedAt, &s.LastChecked, &s.Status); err != nil {
+		s, err := scanServer(rows)
+		if err != nil {
 			return nil, err
 		}
 		servers = append(servers, s)
@@ -28,40 +88,41 @@ func (d *DB) ListServers() ([]Server, error) {
 }
 
 func (d *DB) GetServer(id int) (*Server, error) {
-	var s Server
-	err := d.QueryRow(`SELECT id,name,host,port,admin_user,ssl_mode,notes,relay_url,created_at,last_checked,status FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.RelayURL, &s.CreatedAt, &s.LastChecked, &s.Status)
+	s, err := scanServer(d.QueryRow(`SELECT `+serverCols+` `+serverJoin+` WHERE s.id=?`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &s, err
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
-// GetServerWithPassword returns the server plus both encrypted password fields.
+// GetServerWithPassword returns the server plus both encrypted inline password fields.
 // Returns: server, adminPasswordEnc, relayPasswordEnc, error.
 func (d *DB) GetServerWithPassword(id int) (*Server, string, string, error) {
 	var s Server
 	var adminEnc, relayEnc string
-	err := d.QueryRow(`SELECT id,name,host,port,admin_user,admin_password_enc,ssl_mode,notes,relay_url,relay_password_enc,created_at,last_checked,status FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &adminEnc, &s.SSLMode, &s.Notes, &s.RelayURL, &relayEnc, &s.CreatedAt, &s.LastChecked, &s.Status)
+	err := d.QueryRow(`SELECT s.id,s.name,s.host,s.port,s.admin_user,s.admin_password_enc,s.ssl_mode,s.notes,s.relay_url,s.relay_password_enc,s.relay_id,COALESCE(r.name,''),s.created_at,s.last_checked,s.status `+serverJoin+` WHERE s.id=?`, id).
+		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &adminEnc, &s.SSLMode, &s.Notes, &s.RelayURL, &relayEnc, &s.RelayID, &s.RelayName, &s.CreatedAt, &s.LastChecked, &s.Status)
 	if err == sql.ErrNoRows {
 		return nil, "", "", nil
 	}
 	return &s, adminEnc, relayEnc, err
 }
 
-func (d *DB) CreateServer(name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc string) (int64, error) {
-	res, err := d.Exec(`INSERT INTO servers(name,host,port,admin_user,admin_password_enc,ssl_mode,notes,relay_url,relay_password_enc) VALUES(?,?,?,?,?,?,?,?,?)`,
-		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc)
+func (d *DB) CreateServer(name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes string, relayID *int) (int64, error) {
+	res, err := d.Exec(`INSERT INTO servers(name,host,port,admin_user,admin_password_enc,ssl_mode,notes,relay_id) VALUES(?,?,?,?,?,?,?,?)`,
+		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, relayID)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (d *DB) UpdateServer(id int, name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc string) error {
-	_, err := d.Exec(`UPDATE servers SET name=?,host=?,port=?,admin_user=?,admin_password_enc=?,ssl_mode=?,notes=?,relay_url=?,relay_password_enc=? WHERE id=?`,
-		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc, id)
+func (d *DB) UpdateServer(id int, name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes string, relayID *int) error {
+	_, err := d.Exec(`UPDATE servers SET name=?,host=?,port=?,admin_user=?,admin_password_enc=?,ssl_mode=?,notes=?,relay_id=?,relay_url='',relay_password_enc='' WHERE id=?`,
+		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, relayID, id)
 	return err
 }
 
