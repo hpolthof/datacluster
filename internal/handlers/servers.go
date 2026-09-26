@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"datacluster/internal/config"
 	"datacluster/internal/crypto"
 	"datacluster/internal/pg"
 )
@@ -48,6 +49,8 @@ func (h *Handlers) CreateServer(w http.ResponseWriter, r *http.Request) {
 		AdminPassword string `json:"admin_password"`
 		SSLMode       string `json:"ssl_mode"`
 		Notes         string `json:"notes"`
+		RelayURL      string `json:"relay_url"`
+		RelayPassword string `json:"relay_password"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
@@ -69,8 +72,16 @@ func (h *Handlers) CreateServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "encryption failed")
 		return
 	}
+	relayEnc := ""
+	if body.RelayPassword != "" {
+		relayEnc, err = crypto.Encrypt(body.RelayPassword)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "encryption failed")
+			return
+		}
+	}
 
-	id, err := h.db.CreateServer(body.Name, body.Host, body.Port, body.AdminUser, enc, body.SSLMode, body.Notes)
+	id, err := h.db.CreateServer(body.Name, body.Host, body.Port, body.AdminUser, enc, body.SSLMode, body.Notes, body.RelayURL, relayEnc)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -87,7 +98,7 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, existingEnc, err := h.db.GetServerWithPassword(id)
+	existing, existingAdminEnc, existingRelayEnc, err := h.db.GetServerWithPassword(id)
 	if err != nil || existing == nil {
 		writeError(w, http.StatusNotFound, "server not found")
 		return
@@ -101,6 +112,8 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		AdminPassword string `json:"admin_password"`
 		SSLMode       string `json:"ssl_mode"`
 		Notes         string `json:"notes"`
+		RelayURL      string `json:"relay_url"`
+		RelayPassword string `json:"relay_password"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
@@ -121,17 +134,28 @@ func (h *Handlers) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	if body.SSLMode == "" {
 		body.SSLMode = existing.SSLMode
 	}
+	if body.RelayURL == "" {
+		body.RelayURL = existing.RelayURL
+	}
 
-	enc := existingEnc
+	adminEnc := existingAdminEnc
 	if body.AdminPassword != "" {
-		enc, err = crypto.Encrypt(body.AdminPassword)
+		adminEnc, err = crypto.Encrypt(body.AdminPassword)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "encryption failed")
+			return
+		}
+	}
+	relayEnc := existingRelayEnc
+	if body.RelayPassword != "" {
+		relayEnc, err = crypto.Encrypt(body.RelayPassword)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "encryption failed")
 			return
 		}
 	}
 
-	if err := h.db.UpdateServer(id, body.Name, body.Host, body.Port, body.AdminUser, enc, body.SSLMode, body.Notes); err != nil {
+	if err := h.db.UpdateServer(id, body.Name, body.Host, body.Port, body.AdminUser, adminEnc, body.SSLMode, body.Notes, body.RelayURL, relayEnc); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -207,19 +231,28 @@ func (h *Handlers) ListServerDatabases(w http.ResponseWriter, r *http.Request) {
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 func (h *Handlers) serverConnParams(serverID int) (*pg.ConnParams, error) {
-	s, enc, err := h.db.GetServerWithPassword(serverID)
+	s, adminEnc, relayEnc, err := h.db.GetServerWithPassword(serverID)
 	if err != nil || s == nil {
 		return nil, err
 	}
-	pass, err := crypto.Decrypt(enc)
+	pass, err := crypto.Decrypt(adminEnc)
 	if err != nil {
 		return nil, err
 	}
-	return &pg.ConnParams{
+	params := &pg.ConnParams{
 		Host:     s.Host,
 		Port:     s.Port,
 		User:     s.AdminUser,
 		Password: pass,
 		SSLMode:  s.SSLMode,
-	}, nil
+		RelayURL: s.RelayURL,
+	}
+	if s.RelayURL != "" && relayEnc != "" {
+		relayPass, err := crypto.Decrypt(relayEnc)
+		if err != nil {
+			return nil, err
+		}
+		params.RelayToken = config.TokenFromPassword(relayPass)
+	}
+	return params, nil
 }

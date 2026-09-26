@@ -47,3 +47,9 @@ func deriveToken(password string) string {
 	mac.Write([]byte("datacluster-session-v1"))
 	return hex.EncodeToString(mac.Sum(nil))
 }
+
+// TokenFromPassword derives the Bearer token for a given APP_PASSWORD.
+// Used to authenticate outbound relay connections.
+func TokenFromPassword(password string) string {
+	return deriveToken(password)
+}

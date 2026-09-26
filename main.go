@@ -70,6 +70,8 @@ func main() {
 		r.Delete("/api/clusters/{id}", h.DeleteCluster)
 		r.Post("/api/clusters/{id}/members", h.AddClusterMember)
 		r.Delete("/api/clusters/{id}/members/{serverId}", h.RemoveClusterMember)
+
+		r.Get("/api/relay", h.Relay)
 	})
 
 	// Embedded static files — SPA fallback to index.html

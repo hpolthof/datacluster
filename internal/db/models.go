@@ -3,16 +3,17 @@ package db
 import "time"
 
 type Server struct {
-	ID               int        `json:"id"`
-	Name             string     `json:"name"`
-	Host             string     `json:"host"`
-	Port             int        `json:"port"`
-	AdminUser        string     `json:"admin_user"`
-	SSLMode          string     `json:"ssl_mode"`
-	Notes            string     `json:"notes"`
-	CreatedAt        time.Time  `json:"created_at"`
-	LastChecked      *time.Time `json:"last_checked"`
-	Status           string     `json:"status"`
+	ID          int        `json:"id"`
+	Name        string     `json:"name"`
+	Host        string     `json:"host"`
+	Port        int        `json:"port"`
+	AdminUser   string     `json:"admin_user"`
+	SSLMode     string     `json:"ssl_mode"`
+	Notes       string     `json:"notes"`
+	RelayURL    string     `json:"relay_url"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastChecked *time.Time `json:"last_checked"`
+	Status      string     `json:"status"`
 }
 
 type ManagedDatabase struct {

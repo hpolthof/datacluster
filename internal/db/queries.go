@@ -8,7 +8,7 @@ import (
 // ─── Servers ─────────────────────────────────────────────────────────────────
 
 func (d *DB) ListServers() ([]Server, error) {
-	rows, err := d.Query(`SELECT id,name,host,port,admin_user,ssl_mode,notes,created_at,last_checked,status FROM servers ORDER BY name`)
+	rows, err := d.Query(`SELECT id,name,host,port,admin_user,ssl_mode,notes,relay_url,created_at,last_checked,status FROM servers ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -16,7 +16,7 @@ func (d *DB) ListServers() ([]Server, error) {
 	var servers []Server
 	for rows.Next() {
 		var s Server
-		if err := rows.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.CreatedAt, &s.LastChecked, &s.Status); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.RelayURL, &s.CreatedAt, &s.LastChecked, &s.Status); err != nil {
 			return nil, err
 		}
 		servers = append(servers, s)
@@ -29,37 +29,39 @@ func (d *DB) ListServers() ([]Server, error) {
 
 func (d *DB) GetServer(id int) (*Server, error) {
 	var s Server
-	err := d.QueryRow(`SELECT id,name,host,port,admin_user,ssl_mode,notes,created_at,last_checked,status FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.CreatedAt, &s.LastChecked, &s.Status)
+	err := d.QueryRow(`SELECT id,name,host,port,admin_user,ssl_mode,notes,relay_url,created_at,last_checked,status FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &s.SSLMode, &s.Notes, &s.RelayURL, &s.CreatedAt, &s.LastChecked, &s.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &s, err
 }
 
-func (d *DB) GetServerWithPassword(id int) (*Server, string, error) {
+// GetServerWithPassword returns the server plus both encrypted password fields.
+// Returns: server, adminPasswordEnc, relayPasswordEnc, error.
+func (d *DB) GetServerWithPassword(id int) (*Server, string, string, error) {
 	var s Server
-	var enc string
-	err := d.QueryRow(`SELECT id,name,host,port,admin_user,admin_password_enc,ssl_mode,notes,created_at,last_checked,status FROM servers WHERE id=?`, id).
-		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &enc, &s.SSLMode, &s.Notes, &s.CreatedAt, &s.LastChecked, &s.Status)
+	var adminEnc, relayEnc string
+	err := d.QueryRow(`SELECT id,name,host,port,admin_user,admin_password_enc,ssl_mode,notes,relay_url,relay_password_enc,created_at,last_checked,status FROM servers WHERE id=?`, id).
+		Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.AdminUser, &adminEnc, &s.SSLMode, &s.Notes, &s.RelayURL, &relayEnc, &s.CreatedAt, &s.LastChecked, &s.Status)
 	if err == sql.ErrNoRows {
-		return nil, "", nil
+		return nil, "", "", nil
 	}
-	return &s, enc, err
+	return &s, adminEnc, relayEnc, err
 }
 
-func (d *DB) CreateServer(name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes string) (int64, error) {
-	res, err := d.Exec(`INSERT INTO servers(name,host,port,admin_user,admin_password_enc,ssl_mode,notes) VALUES(?,?,?,?,?,?,?)`,
-		name, host, port, adminUser, adminPasswordEnc, sslMode, notes)
+func (d *DB) CreateServer(name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc string) (int64, error) {
+	res, err := d.Exec(`INSERT INTO servers(name,host,port,admin_user,admin_password_enc,ssl_mode,notes,relay_url,relay_password_enc) VALUES(?,?,?,?,?,?,?,?,?)`,
+		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (d *DB) UpdateServer(id int, name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes string) error {
-	_, err := d.Exec(`UPDATE servers SET name=?,host=?,port=?,admin_user=?,admin_password_enc=?,ssl_mode=?,notes=? WHERE id=?`,
-		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, id)
+func (d *DB) UpdateServer(id int, name, host string, port int, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc string) error {
+	_, err := d.Exec(`UPDATE servers SET name=?,host=?,port=?,admin_user=?,admin_password_enc=?,ssl_mode=?,notes=?,relay_url=?,relay_password_enc=? WHERE id=?`,
+		name, host, port, adminUser, adminPasswordEnc, sslMode, notes, relayURL, relayPasswordEnc, id)
 	return err
 }
 

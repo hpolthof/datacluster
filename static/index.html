@@ -315,7 +315,7 @@ async function renderServers(){
 
 function srvRow(s){
   return `<tr id="sr-${s.id}">
-    <td><strong>${esc(s.name)}</strong></td><td class="mono">${esc(s.host)}:${s.port}</td>
+    <td><strong>${esc(s.name)}</strong>${s.relay_url?` <span style="font-size:11px;background:#1e293b;color:#94a3b8;border-radius:4px;padding:1px 5px">relay</span>`:''}</td><td class="mono">${esc(s.host)}:${s.port}</td>
     <td>${esc(s.admin_user)}</td><td class="text-muted">${s.ssl_mode}</td>
     <td id="ss-${s.id}">${badge(s.status)}</td><td class="text-muted">${fd(s.last_checked)}</td>
     <td><div class="ac">
@@ -355,6 +355,11 @@ function openSrvModal(srv=null){
         <option value="disable"${e.ssl_mode==='disable'?' selected':''}>disable</option>
       </select></div>
       <div class="fg"><label>Notes</label><textarea id="snotes" rows="2">${esc(e.notes||'')}</textarea></div>
+      <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px">Relay (jump server)</summary>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+        <div class="fg"><label>Relay URL <span style="color:var(--muted);font-weight:400">(DataCluster instance that can reach this server)</span></label><input id="srelay" placeholder="https://datacluster-lw02.example.com" value="${esc(e.relay_url||'')}"></div>
+        <div class="fg"><label>Relay APP_PASSWORD ${srv?'(blank = keep current)':''}</label><input type="password" id="srelaypw" placeholder="${srv&&e.relay_url?'••••':'leave empty if no relay'}"></div>
+      </div></details>
     </div>
     <div class="modal-f">
       <button class="btn btn-s" onclick="closeModal()">Cancel</button>
@@ -369,9 +374,13 @@ async function saveSrv(id){
   const name=document.getElementById('sn').value.trim(), host=document.getElementById('sh').value.trim(),
     port=+document.getElementById('sp').value||5432, user=document.getElementById('su').value.trim(),
     pass=document.getElementById('sw').value, ssl=document.getElementById('ssl').value,
-    notes=document.getElementById('snotes').value.trim();
+    notes=document.getElementById('snotes').value.trim(),
+    relayURL=document.getElementById('srelay').value.trim(),
+    relayPw=document.getElementById('srelaypw').value;
   if(!name||!host||!user||(!id&&!pass)){ toast('Please fill in all required fields','error'); return; }
-  const body={name,host,port,admin_user:user,ssl_mode:ssl,notes}; if(pass) body.admin_password=pass;
+  const body={name,host,port,admin_user:user,ssl_mode:ssl,notes,relay_url:relayURL};
+  if(pass) body.admin_password=pass;
+  if(relayPw) body.relay_password=relayPw;
   try {
     id ? await api('PUT',`/api/servers/${id}`,body) : await api('POST','/api/servers',body);
     toast(id?'Server updated':'Server added','success');

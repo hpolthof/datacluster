@@ -6,15 +6,19 @@ import (
 	"regexp"
 
 	"github.com/jackc/pgx/v5"
+
+	"datacluster/internal/relay"
 )
 
 type ConnParams struct {
-	Host     string
-	Port     int
-	User     string
-	Password string
-	Database string
-	SSLMode  string
+	Host       string
+	Port       int
+	User       string
+	Password   string
+	Database   string
+	SSLMode    string
+	RelayURL   string // optional: base URL of relay DataCluster instance
+	RelayToken string // optional: Bearer token for the relay instance
 }
 
 func (p ConnParams) DSN(database string) string {
@@ -26,7 +30,14 @@ func (p ConnParams) DSN(database string) string {
 }
 
 func Connect(ctx context.Context, p ConnParams, database string) (*pgx.Conn, error) {
-	return pgx.Connect(ctx, p.DSN(database))
+	config, err := pgx.ParseConfig(p.DSN(database))
+	if err != nil {
+		return nil, err
+	}
+	if p.RelayURL != "" && p.RelayToken != "" {
+		config.Config.DialFunc = relay.DialFunc(p.RelayURL, p.RelayToken)
+	}
+	return pgx.ConnectConfig(ctx, config)
 }
 
 // TestConnection checks if we can connect and returns the server version.

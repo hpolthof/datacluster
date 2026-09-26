@@ -91,5 +91,11 @@ CREATE TABLE IF NOT EXISTS migrations (
     log TEXT NOT NULL DEFAULT ''
 );
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	// Additive column migrations — SQLite has no IF NOT EXISTS for columns, ignore duplicate errors.
+	d.Exec(`ALTER TABLE servers ADD COLUMN relay_url TEXT NOT NULL DEFAULT ''`)
+	d.Exec(`ALTER TABLE servers ADD COLUMN relay_password_enc TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
