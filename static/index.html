@@ -614,12 +614,14 @@ async function renderMigrations(){
         <td>${badge(m.status)}</td><td class="text-muted">${fd(m.created_at)}</td>
         <td><div class="ac">
           <button class="btn btn-g btn-sm" data-mlog="${m.id}">Log</button>
+          ${!['running','pending'].includes(m.status)?`<button class="btn btn-g btn-sm" data-mrerun="${m.id}" title="Re-run this migration"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.36"/></svg></button>`:''}
           <button class="btn btn-g btn-sm" data-mdel="${m.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
         </div></td>
       </tr>`).join('')}</tbody>
     </table></div>`}`;
   mc.querySelector('#add-mig')?.addEventListener('click',()=>openMigModal(srvs));
   mc.querySelectorAll('[data-mlog]').forEach(b=>b.addEventListener('click',()=>openMigLog(+b.dataset.mlog)));
+  mc.querySelectorAll('[data-mrerun]').forEach(b=>b.addEventListener('click',()=>rerunMig(migs.find(m=>m.id===+b.dataset.mrerun))));
   mc.querySelectorAll('[data-mdel]').forEach(b=>b.addEventListener('click',()=>delMig(+b.dataset.mdel,migs)));
   if(migs.some(m=>['running','pending'].includes(m.status))){
     S.timers.push(setInterval(()=>renderMigrations(),5000));
@@ -724,6 +726,23 @@ async function delMig(id,migs){
   if(['running','pending'].includes(m?.status)){ toast('Cannot delete a running migration','error'); return; }
   if(!confirm('Delete this migration?')) return;
   try{ await api('DELETE',`/api/migrations/${id}`); toast('Migration deleted','success'); renderMigrations(); }catch(e){ toast(e.message,'error'); }
+}
+
+async function rerunMig(m){
+  if(!m) return;
+  if(!confirm(`Re-run migration "${m.name||'#'+m.id}"?\n\n${m.source_server_name}/${m.source_database} → ${m.target_server_name}/${m.target_database}`)) return;
+  try{
+    await api('POST','/api/migrations',{
+      name: m.name,
+      source_server_id: m.source_server_id,
+      source_database: m.source_database,
+      target_server_id: m.target_server_id,
+      target_database: m.target_database,
+      migrate_users: m.migrate_users,
+      cleanup_source: m.cleanup_source,
+    });
+    toast('Migration re-started','success'); renderMigrations();
+  }catch(e){ toast(e.message,'error'); }
 }
 
 // ── Clusters ──────────────────────────────────────────────────────────────────
