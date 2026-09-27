@@ -178,6 +178,21 @@ func (d *DB) GetManagedDatabase(id int) (*ManagedDatabase, string, error) {
 	return &m, enc, err
 }
 
+func (d *DB) GetManagedDatabaseDetail(id int) (*ManagedDatabaseDetail, string, error) {
+	var m ManagedDatabaseDetail
+	var enc string
+	err := d.QueryRow(`
+		SELECT md.id, md.server_id, s.name, s.host, s.port, s.ssl_mode,
+		       md.database_name, md.owner_user, md.owner_password_enc, md.created_at, md.notes
+		FROM managed_databases md JOIN servers s ON s.id=md.server_id WHERE md.id=?`, id).
+		Scan(&m.ID, &m.ServerID, &m.ServerName, &m.ServerHost, &m.ServerPort, &m.ServerSSLMode,
+			&m.DatabaseName, &m.OwnerUser, &enc, &m.CreatedAt, &m.Notes)
+	if err == sql.ErrNoRows {
+		return nil, "", nil
+	}
+	return &m, enc, err
+}
+
 func (d *DB) CreateManagedDatabase(serverID int, dbName, ownerUser, ownerPasswordEnc, notes string) (int64, error) {
 	res, err := d.Exec(`INSERT INTO managed_databases(server_id,database_name,owner_user,owner_password_enc,notes) VALUES(?,?,?,?,?)`,
 		serverID, dbName, ownerUser, ownerPasswordEnc, notes)

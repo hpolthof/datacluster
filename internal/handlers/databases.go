@@ -75,6 +75,30 @@ func (h *Handlers) CreateManagedDatabase(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, mdb)
 }
 
+func (h *Handlers) GetManagedDatabaseDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	detail, enc, err := h.db.GetManagedDatabaseDetail(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if detail == nil {
+		writeError(w, http.StatusNotFound, "database not found")
+		return
+	}
+	pass, err := crypto.Decrypt(enc)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "decryption failed")
+		return
+	}
+	detail.OwnerPassword = pass
+	writeJSON(w, http.StatusOK, detail)
+}
+
 func (h *Handlers) DeleteManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {

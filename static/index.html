@@ -295,6 +295,16 @@ function navigateServer(id, name){
   renderServerDetail(id).catch(e=>{ toast(e.message,'error'); c.innerHTML=`<div style="color:var(--red);padding:40px">${esc(e.message)}</div>`; });
 }
 
+function navigateDatabase(id, name){
+  clearTimers();
+  document.querySelectorAll('[data-s]').forEach(el=>el.classList.remove('active'));
+  document.querySelector('[data-s="databases"]')?.classList.add('active');
+  document.getElementById('pt').textContent = name||'Database detail';
+  const c = document.getElementById('mc');
+  c.innerHTML = `<div style="color:var(--muted);padding:40px">Loading...</div>`;
+  renderDatabaseDetail(id).catch(e=>{ toast(e.message,'error'); c.innerHTML=`<div style="color:var(--red);padding:40px">${esc(e.message)}</div>`; });
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 async function renderDashboard(){
   const [stats,srvs] = await Promise.all([api('GET','/api/status'),api('GET','/api/servers')]);
@@ -544,7 +554,7 @@ async function renderDatabases(){
     <div class="table-wrap"><table>
       <thead><tr><th>Database</th><th>Owner</th><th>Server</th><th>Created</th><th>Notes</th><th>Actions</th></tr></thead>
       <tbody>${dbs.map(d=>`<tr>
-        <td><strong class="mono">${esc(d.database_name)}</strong></td>
+        <td><strong class="mono" style="cursor:pointer;color:var(--accent)" data-dbview="${d.id}" data-dbname="${esc(d.database_name)}">${esc(d.database_name)}</strong></td>
         <td class="mono">${esc(d.owner_user)}</td><td>${esc(d.server_name)}</td>
         <td class="text-muted">${fd(d.created_at)}</td><td class="text-muted">${esc(d.notes)||'—'}</td>
         <td><button class="btn btn-g btn-sm" data-ddb="${d.id}" style="color:var(--red)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg> Delete</button></td>
@@ -552,6 +562,7 @@ async function renderDatabases(){
     </table></div>`}`;
   mc.querySelector('#add-db')?.addEventListener('click',()=>openDbModal(srvs));
   mc.querySelectorAll('[data-ddb]').forEach(b=>b.addEventListener('click',()=>delDb(+b.dataset.ddb,dbs)));
+  mc.querySelectorAll('[data-dbview]').forEach(el=>el.addEventListener('click',()=>navigateDatabase(+el.dataset.dbview,el.dataset.dbname)));
 }
 
 function openDbModal(srvs){
@@ -591,6 +602,62 @@ async function delDb(id,dbs){
   const d=dbs.find(x=>x.id===id);
   if(!confirm(`Permanently delete database "${d?.database_name}" and user "${d?.owner_user}"?\n\nThis cannot be undone.`)) return;
   try{ await api('DELETE',`/api/databases/${id}`); toast('Database deleted','success'); renderDatabases(); }catch(e){ toast(e.message,'error'); }
+}
+
+async function renderDatabaseDetail(id){
+  const d = await api('GET',`/api/databases/${id}`);
+  const mc = document.getElementById('mc');
+  const connStr = `postgresql://${esc(d.owner_user)}@${esc(d.server_host)}:${d.server_port}/${esc(d.database_name)}`;
+
+  mc.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px">
+      <button class="btn btn-s btn-sm" id="back-db"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg> Databases</button>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-kv">
+        <div class="detail-kv-title">Database</div>
+        <div class="kv-row"><span class="kv-key">Name</span><span class="kv-val">${esc(d.database_name)}</span></div>
+        <div class="kv-row"><span class="kv-key">Owner</span><span class="kv-val">${esc(d.owner_user)}</span></div>
+        <div class="kv-row"><span class="kv-key">Created</span><span class="kv-val">${fd(d.created_at)}</span></div>
+        ${d.notes?`<div class="kv-row"><span class="kv-key">Notes</span><span class="kv-val" style="font-family:inherit">${esc(d.notes)}</span></div>`:''}
+      </div>
+      <div class="detail-kv">
+        <div class="detail-kv-title">Server</div>
+        <div class="kv-row"><span class="kv-key">Name</span><span class="kv-val">${esc(d.server_name)}</span></div>
+        <div class="kv-row"><span class="kv-key">Host</span><span class="kv-val">${esc(d.server_host)}:${d.server_port}</span></div>
+        <div class="kv-row"><span class="kv-key">SSL mode</span><span class="kv-val">${esc(d.server_ssl_mode)}</span></div>
+      </div>
+    </div>
+
+    <div class="section-sep">Connection</div>
+    <div class="detail-kv" style="margin-bottom:16px">
+      <div class="kv-row"><span class="kv-key">Connection string</span><span class="kv-val">${connStr}</span></div>
+      <div class="kv-row">
+        <span class="kv-key">Password</span>
+        <span style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <span class="mono" id="db-pw" style="font-size:12.5px">••••••••••••</span>
+          <button class="btn-x" id="db-pw-toggle" title="Show/hide password">
+            <svg id="eye-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </span>
+      </div>
+    </div>`;
+
+  mc.querySelector('#back-db').addEventListener('click',()=>navigate('databases'));
+
+  let pwVisible = false;
+  const pwEl = mc.querySelector('#db-pw');
+  const eyeIcon = mc.querySelector('#eye-icon');
+  mc.querySelector('#db-pw-toggle').addEventListener('click',()=>{
+    pwVisible = !pwVisible;
+    pwEl.textContent = pwVisible ? d.owner_password : '••••••••••••';
+    eyeIcon.innerHTML = pwVisible
+      ? '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+      : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  });
 }
 
 // ── Migrations ────────────────────────────────────────────────────────────────

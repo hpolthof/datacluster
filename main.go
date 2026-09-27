@@ -62,6 +62,7 @@ func main() {
 
 		r.Get("/api/databases", h.ListManagedDatabases)
 		r.Post("/api/databases", h.CreateManagedDatabase)
+		r.Get("/api/databases/{id}", h.GetManagedDatabaseDetail)
 		r.Delete("/api/databases/{id}", h.DeleteManagedDatabase)
 
 		r.Get("/api/migrations", h.ListMigrations)

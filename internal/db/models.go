@@ -35,6 +35,20 @@ type ManagedDatabase struct {
 	Notes        string    `json:"notes"`
 }
 
+type ManagedDatabaseDetail struct {
+	ID            int       `json:"id"`
+	ServerID      int       `json:"server_id"`
+	ServerName    string    `json:"server_name"`
+	ServerHost    string    `json:"server_host"`
+	ServerPort    int       `json:"server_port"`
+	ServerSSLMode string    `json:"server_ssl_mode"`
+	DatabaseName  string    `json:"database_name"`
+	OwnerUser     string    `json:"owner_user"`
+	OwnerPassword string    `json:"owner_password"`
+	CreatedAt     time.Time `json:"created_at"`
+	Notes         string    `json:"notes"`
+}
+
 type Cluster struct {
 	ID              int       `json:"id"`
 	Name            string    `json:"name"`
