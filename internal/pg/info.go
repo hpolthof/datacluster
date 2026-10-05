@@ -42,13 +42,17 @@ type ServerInfo struct {
 	Settings          []SettingInfo  `json:"settings"`
 }
 
+// tableCountQuery intentionally has no schema filter: PostgreSQL's pg_class contains
+// relations from user, system, and internal schemas alike.
+const tableCountQuery = `SELECT count(*) FROM pg_class WHERE relkind IN ('r','p')`
+
 // CountTables counts ordinary and partitioned tables in every schema, including system schemas.
 func CountTables(ctx context.Context, p ConnParams, database string) (int64, error) {
 	conn, err := Connect(ctx, p, database)
 	if err != nil { return 0, err }
 	defer conn.Close(ctx)
 	var count int64
-	err = conn.QueryRow(ctx, `SELECT count(*) FROM pg_class WHERE relkind IN ('r','p')`).Scan(&count)
+	err = conn.QueryRow(ctx, tableCountQuery).Scan(&count)
 	return count, err
 }
 

@@ -22,5 +22,12 @@ func TestManagedDatabaseStatisticsAndMissingValues(t *testing.T) {
 	if missing.TableCount != nil || missing.SizeBytes != nil { t.Fatalf("missing statistics should be null: %+v", missing) }
 	encoded, err := json.Marshal(missing)
 	if err != nil { t.Fatal(err) }
-	if string(encoded) == "" { t.Fatal("empty JSON") }
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil { t.Fatal(err) }
+	if payload["table_count"] != nil || payload["size_bytes"] != nil {
+		t.Fatalf("missing statistics must serialize as null: %s", encoded)
+	}
+	if payload["name"] != "missing" {
+		t.Fatalf("database entry was not retained: %s", encoded)
+	}
 }
