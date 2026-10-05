@@ -530,7 +530,7 @@ async function renderServerDetail(id){
         </div>`).join('')}
     </div>
 
-    <div style="margin-top:6px;font-size:11.5px;color:var(--muted)">${esc(info.version)}</div>`;
+    <div style="margin-top:6px;font-size:11.5px;color:var(--muted)">${info.timescaledb?'TimescaleDB':'PostgreSQL'} · ${esc(info.version)}</div>`;
 
   mc.querySelector('#back-srv').addEventListener('click',()=>navigate('servers'));
 }
