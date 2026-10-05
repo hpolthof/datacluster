@@ -139,8 +139,9 @@ func (d *DB) DeleteServer(id int) error {
 // ─── Managed Databases ────────────────────────────────────────────────────────
 
 func (d *DB) ListManagedDatabases(serverID *int) ([]ManagedDatabase, error) {
-	query := `SELECT md.id,md.server_id,s.name,md.database_name,md.owner_user,md.created_at,md.notes
-		FROM managed_databases md JOIN servers s ON s.id=md.server_id`
+	query := `SELECT md.id,md.server_id,s.name,md.database_name,md.owner_user,md.created_at,md.notes,ds.table_count,ds.size_bytes
+		FROM managed_databases md JOIN servers s ON s.id=md.server_id
+		LEFT JOIN database_statistics ds ON ds.server_id=md.server_id AND ds.database_name=md.database_name`
 	args := []any{}
 	if serverID != nil {
 		query += " WHERE md.server_id=?"
@@ -155,7 +156,7 @@ func (d *DB) ListManagedDatabases(serverID *int) ([]ManagedDatabase, error) {
 	var list []ManagedDatabase
 	for rows.Next() {
 		var m ManagedDatabase
-		if err := rows.Scan(&m.ID, &m.ServerID, &m.ServerName, &m.DatabaseName, &m.OwnerUser, &m.CreatedAt, &m.Notes); err != nil {
+		if err := rows.Scan(&m.ID, &m.ServerID, &m.ServerName, &m.DatabaseName, &m.OwnerUser, &m.CreatedAt, &m.Notes, &m.TableCount, &m.SizeBytes); err != nil {
 			return nil, err
 		}
 		list = append(list, m)
@@ -164,6 +165,12 @@ func (d *DB) ListManagedDatabases(serverID *int) ([]ManagedDatabase, error) {
 		list = []ManagedDatabase{}
 	}
 	return list, rows.Err()
+}
+
+func (d *DB) SaveDatabaseStatistics(serverID int, name string, tableCount, sizeBytes *int64) error {
+	_, err := d.Exec(`INSERT INTO database_statistics(server_id,database_name,table_count,size_bytes) VALUES(?,?,?,?)
+		ON CONFLICT(server_id,database_name) DO UPDATE SET table_count=excluded.table_count,size_bytes=excluded.size_bytes`, serverID, name, tableCount, sizeBytes)
+	return err
 }
 
 func (d *DB) GetManagedDatabase(id int) (*ManagedDatabase, string, error) {

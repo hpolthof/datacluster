@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS managed_databases (
     UNIQUE(server_id, database_name)
 );
 
+CREATE TABLE IF NOT EXISTS database_statistics (
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    database_name TEXT NOT NULL,
+    table_count INTEGER,
+    size_bytes INTEGER,
+    PRIMARY KEY(server_id, database_name)
+);
+
 CREATE TABLE IF NOT EXISTS clusters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,

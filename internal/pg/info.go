@@ -7,7 +7,8 @@ import (
 
 type DatabaseInfo struct {
 	Name        string `json:"name"`
-	SizeBytes   int64  `json:"size_bytes"`
+	SizeBytes   *int64 `json:"size_bytes"`
+	TableCount  *int64 `json:"table_count"`
 	Owner       string `json:"owner"`
 	Connections int    `json:"connections"`
 	Collation   string `json:"collation"`
@@ -39,6 +40,16 @@ type ServerInfo struct {
 	Databases         []DatabaseInfo `json:"databases"`
 	Roles             []RoleInfo     `json:"roles"`
 	Settings          []SettingInfo  `json:"settings"`
+}
+
+// CountTables counts ordinary and partitioned tables in every schema, including system schemas.
+func CountTables(ctx context.Context, p ConnParams, database string) (int64, error) {
+	conn, err := Connect(ctx, p, database)
+	if err != nil { return 0, err }
+	defer conn.Close(ctx)
+	var count int64
+	err = conn.QueryRow(ctx, `SELECT count(*) FROM pg_class WHERE relkind IN ('r','p')`).Scan(&count)
+	return count, err
 }
 
 func GetServerInfo(ctx context.Context, p ConnParams) (*ServerInfo, error) {
@@ -77,7 +88,12 @@ func GetServerInfo(ctx context.Context, p ConnParams) (*ServerInfo, error) {
 		defer rows.Close()
 		for rows.Next() {
 			var db DatabaseInfo
-			if err := rows.Scan(&db.Name, &db.SizeBytes, &db.Owner, &db.Collation, &db.Connections); err == nil {
+			var size int64
+			if err := rows.Scan(&db.Name, &size, &db.Owner, &db.Collation, &db.Connections); err == nil {
+				db.SizeBytes = &size
+				if count, countErr := CountTables(ctx, p, db.Name); countErr == nil {
+					db.TableCount = &count
+				}
 				info.Databases = append(info.Databases, db)
 			}
 		}
