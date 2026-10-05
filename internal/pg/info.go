@@ -32,6 +32,8 @@ type SettingInfo struct {
 }
 
 type ServerInfo struct {
+	Engine            Engine         `json:"engine"`
+	TimescaleDB       bool           `json:"timescaledb"`
 	Version           string         `json:"version"`
 	UptimeSeconds     float64        `json:"uptime_seconds"`
 	ConnectionsActive int            `json:"connections_active"`
@@ -42,6 +44,11 @@ type ServerInfo struct {
 }
 
 func GetServerInfo(ctx context.Context, p ConnParams) (*ServerInfo, error) {
+	capabilities, err := DetectCapabilities(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := Connect(ctx, p, "postgres")
 	if err != nil {
 		return nil, err
@@ -49,6 +56,8 @@ func GetServerInfo(ctx context.Context, p ConnParams) (*ServerInfo, error) {
 	defer conn.Close(ctx)
 
 	info := &ServerInfo{
+		Engine:             capabilities.Engine,
+		TimescaleDB:        capabilities.TimescaleDB,
 		Databases: []DatabaseInfo{},
 		Roles:     []RoleInfo{},
 		Settings:  []SettingInfo{},
