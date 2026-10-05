@@ -229,6 +229,9 @@ func (h *Handlers) GetServerInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	for _, database := range info.Databases {
+		_ = h.db.SaveDatabaseStatistics(id, database.Name, database.TableCount, database.SizeBytes)
+	}
 	writeJSON(w, http.StatusOK, info)
 }
 

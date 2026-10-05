@@ -33,6 +33,8 @@ type ManagedDatabase struct {
 	OwnerUser    string    `json:"owner_user"`
 	CreatedAt    time.Time `json:"created_at"`
 	Notes        string    `json:"notes"`
+	TableCount   *int64    `json:"table_count"`
+	SizeBytes    *int64    `json:"size_bytes"`
 }
 
 type ManagedDatabaseDetail struct {
