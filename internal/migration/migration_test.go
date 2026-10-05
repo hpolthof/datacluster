@@ -17,6 +17,23 @@ func TestLogTimescaleCopyForOrdinaryObjects(t *testing.T) {
 	}
 }
 
+func TestHypertablePreservationEligibility(t *testing.T) {
+	// Preservation is only attempted when both databases have the extension;
+	// cross-product migrations retain ordinary PostgreSQL tables.
+	for _, tc := range []struct {
+		source, target bool
+		wantAttempt    bool
+	}{
+		{true, true, true},
+		{true, false, false},
+		{false, true, false},
+	} {
+		if got := shouldPreserveHypertables(tc.source, tc.target); got != tc.wantAttempt {
+			t.Errorf("source=%t target=%t: attempt=%t, want %t", tc.source, tc.target, got, tc.wantAttempt)
+		}
+	}
+}
+
 func TestLogTimescaleCopyFallbackForHypertables(t *testing.T) {
 	log := &testLogger{}
 	logTimescaleCopy(true, true, 2, log)
