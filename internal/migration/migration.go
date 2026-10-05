@@ -56,10 +56,19 @@ func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migra
 
 	log.Log(fmt.Sprintf("[%s] Connected to source and target", ts()))
 
+	// TimescaleDB hypertables are copied as ordinary PostgreSQL tables. The
+	// migration does not recreate extension-specific dimensions or policies.
+	if err := logHypertableFallback(ctx, srcConn, dstConn, log); err != nil {
+		return fmt.Errorf("inspect TimescaleDB objects: %w", err)
+	}
+
 	// 1. Copy schema
 	log.Log(fmt.Sprintf("[%s] Copying schema...", ts()))
 	if err := copySchema(ctx, srcConn, dstConn, log); err != nil {
 		return fmt.Errorf("copy schema: %w", err)
+	}
+	if err := preserveHypertables(ctx, srcConn, dstConn, log); err != nil {
+		return fmt.Errorf("prepare hypertables: %w", err)
 	}
 
 	// 2. Disable FK checks on target temporarily
@@ -101,6 +110,80 @@ func Run(ctx context.Context, src, dst pg.ConnParams, srcDB, dstDB string, migra
 
 	log.Log(fmt.Sprintf("[%s] Migration complete — %d total rows", ts(), total))
 	return nil
+}
+
+// preserveHypertables recreates supported one-dimensional time hypertables before
+// rows are copied. Unsupported dimensions or target conversions remain regular tables.
+func preserveHypertables(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
+	var srcTS, dstTS bool
+	if err := src.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')`).Scan(&srcTS); err != nil {
+		return err
+	}
+	if err := dst.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')`).Scan(&dstTS); err != nil {
+		return nil
+	}
+	if !shouldPreserveHypertables(srcTS, dstTS) {
+		return nil
+	}
+	rows, err := src.Query(ctx, `SELECT h.hypertable_name, d.column_name
+		FROM timescaledb_information.hypertables h
+		JOIN timescaledb_information.dimensions d USING (hypertable_schema, hypertable_name)
+		WHERE h.hypertable_schema = 'public' AND d.dimension_number = 1
+		AND d.dimension_type = 'open'`)
+	if err != nil {
+		log.Log(fmt.Sprintf("[%s] [WARN] Cannot inspect hypertable dimensions; copying hypertables as regular tables", ts()))
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table, column string
+		if err := rows.Scan(&table, &column); err != nil {
+			return err
+		}
+		_, err := dst.Exec(ctx, `SELECT create_hypertable($1, $2, if_not_exists => TRUE)`, "public."+table, column)
+		if err != nil {
+			log.Log(fmt.Sprintf("[%s] [WARN] Could not preserve hypertable %q (%v); copying as a regular table. Policies and other extension properties are not preserved", ts(), table, err))
+		} else {
+			log.Log(fmt.Sprintf("[%s] Preserving TimescaleDB hypertable structure for %q; policies are not preserved", ts(), table))
+		}
+	}
+	return rows.Err()
+}
+
+func shouldPreserveHypertables(sourceTimescale, targetTimescale bool) bool {
+	return sourceTimescale && targetTimescale
+}
+
+// logHypertableFallback surfaces the fidelity limitation without making
+// TimescaleDB availability a requirement for ordinary PostgreSQL migrations.
+func logHypertableFallback(ctx context.Context, src, dst *pgx.Conn, log Logger) error {
+	var sourceTimescale, targetTimescale bool
+	if err := src.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')`).Scan(&sourceTimescale); err != nil {
+		return err
+	}
+	if err := dst.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')`).Scan(&targetTimescale); err != nil {
+		return err
+	}
+	if !sourceTimescale && !targetTimescale {
+		return nil
+	}
+	var hypertables int
+	if sourceTimescale {
+		if err := src.QueryRow(ctx, `SELECT count(*) FROM timescaledb_information.hypertables WHERE hypertable_schema = 'public'`).Scan(&hypertables); err != nil {
+			log.Log(fmt.Sprintf("[%s] [WARN] Could not inspect hypertables; schema will be copied as regular PostgreSQL objects", ts()))
+			return nil
+		}
+	}
+	logTimescaleCopy(sourceTimescale, targetTimescale, hypertables, log)
+	return nil
+}
+
+func logTimescaleCopy(sourceTimescale, targetTimescale bool, hypertables int, log Logger) {
+	if hypertables > 0 {
+		log.Log(fmt.Sprintf("[%s] [WARN] Found %d TimescaleDB hypertables; copying them as regular PostgreSQL tables. Hypertable dimensions, policies, and extension-specific behavior will not be preserved", ts(), hypertables))
+	} else {
+		log.Log(fmt.Sprintf("[%s] TimescaleDB detected (source=%t target=%t); copying regular schema objects", ts(), sourceTimescale, targetTimescale))
+	}
 }
 
 func listTables(ctx context.Context, conn *pgx.Conn) ([]string, error) {
