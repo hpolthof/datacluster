@@ -129,12 +129,16 @@ func logHypertableFallback(ctx context.Context, src, dst *pgx.Conn, log Logger) 
 			return nil
 		}
 	}
+	logTimescaleCopy(sourceTimescale, targetTimescale, hypertables, log)
+	return nil
+}
+
+func logTimescaleCopy(sourceTimescale, targetTimescale bool, hypertables int, log Logger) {
 	if hypertables > 0 {
 		log.Log(fmt.Sprintf("[%s] [WARN] Found %d TimescaleDB hypertables; copying them as regular PostgreSQL tables. Hypertable dimensions, policies, and extension-specific behavior will not be preserved", ts(), hypertables))
 	} else {
 		log.Log(fmt.Sprintf("[%s] TimescaleDB detected (source=%t target=%t); copying regular schema objects", ts(), sourceTimescale, targetTimescale))
 	}
-	return nil
 }
 
 func listTables(ctx context.Context, conn *pgx.Conn) ([]string, error) {
